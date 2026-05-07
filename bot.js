@@ -1,10 +1,18 @@
 const fs = require('fs');
 
+// ─── YOUR USER ID (never wiped on reset) ──────────────────────────────────────
+const OWNER_ID = 'YOUR_DISCORD_USER_ID_HERE'; // <-- Replace this with your actual Discord user ID
+
 function loadData(file, fallback = {}) {
   if (!fs.existsSync(file)) {
     fs.writeFileSync(file, JSON.stringify(fallback, null, 2));
   }
-  return JSON.parse(fs.readFileSync(file));
+  try {
+    return JSON.parse(fs.readFileSync(file));
+  } catch (e) {
+    console.error(`⚠️ Failed to parse ${file}, using fallback:`, e.message);
+    return fallback;
+  }
 }
 
 function saveData(file, data) {
@@ -21,25 +29,36 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = '1494316404265189519';
 const GUILD_ID = '1481285716544585863';
 
-// ─── Storage ───────────────────────────────────────────────────────────────────
-const claimedMiraculous = loadData('./claimedMiraculous.json');
-const userMiraculous = loadData('./userMiraculous.json');
-const luckyCharmUsed = loadData('./luckyCharmUsed.json');
-const powerCooldowns = loadData('./powerCooldowns.json');
-const stealCooldowns = loadData('./stealCooldowns.json');
-const userCharms = loadData('./userCharms.json');
-const patrolCooldowns = {}; // userId -> timestamp of last patrol
-const userAlignment = {}; // userId -> 'good' | 'evil'
+// ─── Storage (ALL persisted to disk) ──────────────────────────────────────────
+const claimedMiraculous  = loadData('./claimedMiraculous.json');
+const userMiraculous     = loadData('./userMiraculous.json');
+const luckyCharmUsed     = loadData('./luckyCharmUsed.json');
+const powerCooldowns     = loadData('./powerCooldowns.json');
+const stealCooldowns     = loadData('./stealCooldowns.json');
+const userCharms         = loadData('./userCharms.json');
+const userAlignmentData  = loadData('./userAlignment.json');       // was in-memory only
+const mothModeData       = loadData('./mothMode.json');            // was in-memory only
+const activeAkumaData    = loadData('./activeAkuma.json');         // was in-memory only
+const villainAbilityUsedData = loadData('./villainAbilityUsed.json'); // was in-memory only
+const guardianUpgrades   = loadData('./guardianUpgrades.json');    // was not saved reliably
+const userHPData         = loadData('./userHP.json');              // was in-memory only
+const patrolCooldownData = loadData('./patrolCooldowns.json');     // was in-memory only
+const akumatizationPendingData = loadData('./akumatizationPending.json'); // was in-memory only
+
+// Wrap in proxy-like objects so existing code using these variable names still works
+// (We just use the loaded objects directly — same reference pattern as before)
+const userAlignment        = userAlignmentData;
+const mothMode             = mothModeData;
+const activeAkuma          = activeAkumaData;
+const villainAbilityUsed   = villainAbilityUsedData;
+const userHP               = userHPData;
+const patrolCooldowns      = patrolCooldownData;
+const akumatizationPending = akumatizationPendingData;
 
 // ─── Butterfly / Moth Miraculous State ────────────────────────────────────────
-const mothMode = {};
-const activeAkuma = {};
-const akumatizationPending = {};
-const villainAbilityUsed = {};
-const guardianUpgrades = {}; // userId -> upgrades/unlocks
+// (now loaded from disk above — no separate declarations needed)
 
 // ─── HP System ────────────────────────────────────────────────────────────────
-const userHP = {}; // userId -> current HP (max 100)
 function getHP(userId) {
   if (userHP[userId] === undefined) userHP[userId] = 100;
   return userHP[userId];
@@ -345,7 +364,6 @@ const miraculousList = [
 ];
 
 // ─── American Miracle Box ─────────────────────────────────────────────────────
-// Weight 4 = same rarity as creation/destruction
 const americanMiraculousList = [
   {
     id: "am_eagle", weight: 8, color: 0x4169E1, emoji: "🦅",
@@ -497,12 +515,10 @@ function getRandomAmericanMiraculous() {
   return available[available.length - 1];
 }
 
-// Combined miraculous lookup (both lists)
 function findMiraculous(id) {
   return miraculousList.find(x => x.id === id) || americanMiraculousList.find(x => x.id === id);
 }
 
-// Build the beautiful new miraculous embed matching the reference style
 function buildMiraculousEmbed(miraculous, user) {
   return new EmbedBuilder()
     .setColor(miraculous?.color || 0x7B2FBE)
@@ -547,8 +563,11 @@ function buildVillainRows(monarchId, targetId) {
   return rows;
 }
 
-// Remove a user's miraculous completely
+// ─── Wipe miraculous — NEVER wipes the owner ──────────────────────────────────
 function wipeMiraculous(userId) {
+  // Protect the owner's data from being wiped
+  if (userId === OWNER_ID) return;
+
   const mid = userMiraculous[userId];
   if (mid) {
     delete claimedMiraculous[mid];
@@ -562,6 +581,24 @@ function wipeMiraculous(userId) {
   delete userAlignment[userId];
 }
 
+// ─── Save ALL persistent data ─────────────────────────────────────────────────
+function saveAll() {
+  saveData('./claimedMiraculous.json',       claimedMiraculous);
+  saveData('./userMiraculous.json',           userMiraculous);
+  saveData('./luckyCharmUsed.json',           luckyCharmUsed);
+  saveData('./powerCooldowns.json',           powerCooldowns);
+  saveData('./stealCooldowns.json',           stealCooldowns);
+  saveData('./userCharms.json',               userCharms);
+  saveData('./userAlignment.json',            userAlignment);
+  saveData('./mothMode.json',                 mothMode);
+  saveData('./activeAkuma.json',              activeAkuma);
+  saveData('./villainAbilityUsed.json',       villainAbilityUsed);
+  saveData('./guardianUpgrades.json',         guardianUpgrades);
+  saveData('./userHP.json',                   userHP);
+  saveData('./patrolCooldowns.json',          patrolCooldowns);
+  saveData('./akumatizationPending.json',     akumatizationPending);
+}
+
 // ─── Discord Client ────────────────────────────────────────────────────────────
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent,]
@@ -569,6 +606,7 @@ const client = new Client({
 
 client.once('ready', async () => {
   console.log("✅ Logged in as " + client.user.tag);
+  console.log("🛡️  Owner ID protected from resets: " + OWNER_ID);
 
   const commands = [
     new SlashCommandBuilder()
@@ -1065,6 +1103,11 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ content: "You cannot steal from yourself.", ephemeral: true });
       return;
     }
+    // Prevent stealing from the owner
+    if (target.id === OWNER_ID) {
+      await interaction.reply({ content: "You cannot steal from the Guardian.", ephemeral: true });
+      return;
+    }
     const targetMc = userMiraculous[target.id];
     if (!targetMc) {
       await interaction.reply({ content: "That user has no Miraculous.", ephemeral: true });
@@ -1430,19 +1473,15 @@ client.on('interactionCreate', async interaction => {
         return;
       }
 
-      // Calculate damage
       const damage = Math.floor(Math.random() * (damageMax - damageMin + 1)) + damageMin;
       const targetCurrentHP = getHP(target.id);
       const targetNewHP = applyDamage(target.id, damage);
 
-      // Check for kill: either kill chance rolls OR HP hits 0
       const hpKill = targetNewHP <= 0;
       const rollKill = killChance > 0 && killRoll < killChance;
 
       if (hpKill || rollKill) {
-        // HP-based kill: HP is 0, but Miraculous is NOT wiped
         const killText = (m.killFlavor || `{target} was defeated by the attack.`).replace('{target}', target.username);
-        // Reset HP after defeat
         resetHP(target.id);
 
         await interaction.reply({
@@ -1462,7 +1501,6 @@ client.on('interactionCreate', async interaction => {
             .setTimestamp()]
         });
 
-        // DM the defeated user
         try {
           const defeatedUser = await client.users.fetch(target.id);
           await defeatedUser.send(
@@ -1474,7 +1512,6 @@ client.on('interactionCreate', async interaction => {
         return;
       }
 
-      // HIT — took damage, still alive
       const flavor = (m.targetFlavor || `The attack hit {target}.`).replace('{target}', target.username);
       await interaction.reply({
         embeds: [new EmbedBuilder()
@@ -1493,7 +1530,6 @@ client.on('interactionCreate', async interaction => {
           )
           .setTimestamp()]
       });
-      // DM the hit user
       try {
         const hitUser = await client.users.fetch(target.id);
         await hitUser.send(`⚡ **${interaction.user.username}** used **${m.power}** on you! You took **${damage} damage**. Current HP: **${targetNewHP}/100**`);
@@ -1697,14 +1733,12 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
-    // ── American Miracle Box rarity check (weight 4 = same as Creation/Destruction) ──
     const AMERICAN_BOX_WEIGHT = 4;
     const TOTAL_MIRACULOUS_WEIGHT = miraculousList.reduce((sum, m) => sum + m.weight, 0);
     const americanRoll = Math.random() * (TOTAL_MIRACULOUS_WEIGHT + AMERICAN_BOX_WEIGHT);
     const gotAmericanBox = americanRoll < AMERICAN_BOX_WEIGHT;
 
     if (gotAmericanBox) {
-      // Show the American Miracle Box intro
       const disabled = new ButtonBuilder().setCustomId('reveal_miraculous').setLabel('...').setStyle(ButtonStyle.Secondary).setDisabled(true);
       await interaction.update({ components: [new ActionRowBuilder().addComponents(disabled)] });
 
@@ -1718,8 +1752,6 @@ client.on('interactionCreate', async interaction => {
       setTimeout(async () => {
         try {
           const channel = interaction.channel;
-
-          // Pick a random American miraculous
           const am = getRandomAmericanMiraculous();
           if (!am) {
             await channel.send('⚠️ The American Miracle Box has no remaining Miraculouses to offer.');
@@ -1778,7 +1810,6 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
-    // ── Normal Miraculous roll ─────────────────────────────────────────────────
     const miraculous = getRandomMiraculous();
     if (!miraculous) {
       const disabled = new ButtonBuilder().setCustomId('reveal_miraculous').setLabel('...').setStyle(ButtonStyle.Secondary).setDisabled(true);
@@ -1800,7 +1831,6 @@ client.on('interactionCreate', async interaction => {
       .setLabel('🦹 Use it for Evil Purposes')
       .setStyle(ButtonStyle.Danger);
 
-    // Accept / Renounce buttons replace the old "how will you use this" prompt
     const acceptBtn = new ButtonBuilder()
       .setCustomId(`mc_accept__${interaction.user.id}`)
       .setLabel('Accept')
@@ -1874,7 +1904,6 @@ client.on('interactionCreate', async interaction => {
       return;
     }
     const m = findMiraculous(mid);
-    // Wipe the miraculous
     delete claimedMiraculous[mid];
     delete userMiraculous[interaction.user.id];
     delete powerCooldowns[interaction.user.id];
@@ -2116,9 +2145,18 @@ client.on('interactionCreate', async interaction => {
     const action = interaction.customId.replace('panel__', '');
 
     if (action === 'reset_all') {
-      const count = Object.keys(userMiraculous).length;
-      for (const uid of Object.keys(userMiraculous)) { wipeMiraculous(uid); }
-      await interaction.reply({ content: `🔄 **All Miraculouses have been reset!** **${count}** holder(s) have had their Miraculous removed. The Guardian reclaims the vault.`, ephemeral: false });
+      // Wipe everyone EXCEPT the owner
+      const uids = Object.keys(userMiraculous).filter(uid => uid !== OWNER_ID);
+      const count = uids.length;
+      for (const uid of uids) { wipeMiraculous(uid); }
+      // Also clean up claimedMiraculous entries that don't belong to the owner
+      for (const mid of Object.keys(claimedMiraculous)) {
+        if (claimedMiraculous[mid]?.userId !== OWNER_ID) {
+          delete claimedMiraculous[mid];
+        }
+      }
+      saveAll();
+      await interaction.reply({ content: `🔄 **All Miraculouses have been reset!** **${count}** holder(s) have had their Miraculous removed. *(Your data was preserved.)*`, ephemeral: false });
       return;
     }
 
@@ -2142,10 +2180,19 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (action === 'wipe_economy') {
-      const count = Object.keys(userCharms).length;
-      for (const uid of Object.keys(userCharms)) { delete userCharms[uid]; }
-      for (const uid of Object.keys(patrolCooldowns)) { delete patrolCooldowns[uid]; }
-      await interaction.reply({ content: `💸 **Economy wiped!** **${count}** user balance(s) have been cleared. All Charms are gone.`, ephemeral: false });
+      // Wipe economy for everyone EXCEPT the owner
+      let count = 0;
+      for (const uid of Object.keys(userCharms)) {
+        if (uid !== OWNER_ID) {
+          delete userCharms[uid];
+          count++;
+        }
+      }
+      for (const uid of Object.keys(patrolCooldowns)) {
+        if (uid !== OWNER_ID) delete patrolCooldowns[uid];
+      }
+      saveAll();
+      await interaction.reply({ content: `💸 **Economy wiped!** **${count}** user balance(s) have been cleared. *(Your balance was preserved.)*`, ephemeral: false });
       return;
     }
 
@@ -2172,14 +2219,22 @@ client.on('interactionCreate', async interaction => {
 
 });
 
+// ─── Save ALL data every 5 seconds ────────────────────────────────────────────
 setInterval(() => {
-  saveData('./claimedMiraculous.json', claimedMiraculous);
-  saveData('./userMiraculous.json', userMiraculous);
-  saveData('./luckyCharmUsed.json', luckyCharmUsed);
-  saveData('./powerCooldowns.json', powerCooldowns);
-  saveData('./userCharms.json', userCharms);
-  saveData('./guardianUpgrades.json', guardianUpgrades);
+  saveAll();
 }, 5000);
+
+// ─── Also save on clean shutdown ──────────────────────────────────────────────
+process.on('SIGINT', () => {
+  console.log('💾 Saving all data before shutdown...');
+  saveAll();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  console.log('💾 Saving all data before shutdown...');
+  saveAll();
+  process.exit(0);
+});
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
@@ -2243,11 +2298,22 @@ client.on('interactionCreate', async (interaction) => {
   //   GIMMI: GRAND RESET
   // ════════════════════════════════════════════════════════════════════════════
   if (interaction.isButton() && interaction.customId === 'gimmi_reset') {
+    // Preserve the owner's miraculous during grand reset
+    const ownerMc = claimedMiraculous ? Object.fromEntries(
+      Object.entries(claimedMiraculous).filter(([, v]) => v?.userId === OWNER_ID)
+    ) : {};
+    const ownerUm = userMiraculous[OWNER_ID];
+
     for (const key in claimedMiraculous) { delete claimedMiraculous[key]; }
     for (const key in userMiraculous) { delete userMiraculous[key]; }
+
+    // Restore owner's data
+    Object.assign(claimedMiraculous, ownerMc);
+    if (ownerUm) userMiraculous[OWNER_ID] = ownerUm;
+
     saveData('./userMiraculous.json', userMiraculous);
     saveData('./claimedMiraculous.json', claimedMiraculous);
-    await interaction.reply({ content: `🌌 Gimmi has rewritten reality.\n\nAll Miraculouses across existence have been reset.`, ephemeral: true });
+    await interaction.reply({ content: `🌌 Gimmi has rewritten reality.\n\nAll Miraculouses across existence have been reset. *(Yours were preserved.)*`, ephemeral: true });
     return;
   }
 
