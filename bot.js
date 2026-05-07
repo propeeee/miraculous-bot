@@ -106,7 +106,7 @@ function getCharms(userId) {
 }
 function addCharms(userId, amount) {
   userCharms[userId] = getCharms(userId) + amount;
-  saveData('./userCharms.json', userCharms);
+  saveAll();
 }
 
 // ─── Miraculous server emojis ─────────────────────────────────────────────────
@@ -605,8 +605,9 @@ function wipeMiraculous(userId) {
   delete luckyCharmUsed[userId];
   delete villainAbilityUsed[userId];
   delete userAlignment[userId];
-}
 
+  saveAll();
+}
 // ─── Battle System Helpers ────────────────────────────────────────────────────
 
 /**
@@ -1125,7 +1126,7 @@ client.on('interactionCreate', async interaction => {
     const earned = Math.floor(Math.random() * 401) + 100;
     addCharms(interaction.user.id, earned);
     patrolCooldowns[interaction.user.id] = now;
-    saveData('./patrolCooldowns.json', patrolCooldowns);
+saveAll();
     const m = findMiraculous(mid);
     const patrolMessages = [
       `You swept across the rooftops, protected three civilians, and stopped a runaway vehicle.`,
