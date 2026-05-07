@@ -922,6 +922,18 @@ client.on('interactionCreate', async interaction => {
     await interaction.reply({
       content: "The Guardian senses your courage...\nWill the Kwami choose you? Each Miraculous is unique, only the worthy are selected.",
       components: [new ActionRowBuilder().addComponents(button)]
+        } catch (err) {
+    console.error('Interaction Error:', err);
+
+    try {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: '❌ Something went wrong.',
+          ephemeral: true
+        });
+      }
+    } catch {}
+  }
     });
     return;
   }
