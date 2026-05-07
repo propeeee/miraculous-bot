@@ -17,7 +17,7 @@ const {
   ButtonStyle, EmbedBuilder, PermissionFlagsBits
 } = require('discord.js');
 
-const TOKEN = '';
+const TOKEN = process.env.TOKEN;
 const CLIENT_ID = '1494316404265189519';
 const GUILD_ID = '1481285716544585863';
 
