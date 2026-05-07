@@ -16,7 +16,11 @@ function loadData(file, fallback = {}) {
 }
 
 function saveData(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  try {
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error(`⚠️ Failed to save ${file}:`, e.message);
+  }
 }
 
 const {
@@ -30,33 +34,52 @@ const CLIENT_ID = '1494316404265189519';
 const GUILD_ID = '1481285716544585863';
 
 // ─── Storage (ALL persisted to disk) ──────────────────────────────────────────
-const claimedMiraculous  = loadData('./claimedMiraculous.json');
-const userMiraculous     = loadData('./userMiraculous.json');
-const luckyCharmUsed     = loadData('./luckyCharmUsed.json');
-const powerCooldowns     = loadData('./powerCooldowns.json');
-const stealCooldowns     = loadData('./stealCooldowns.json');
-const userCharms         = loadData('./userCharms.json');
-const userAlignmentData  = loadData('./userAlignment.json');       // was in-memory only
-const mothModeData       = loadData('./mothMode.json');            // was in-memory only
-const activeAkumaData    = loadData('./activeAkuma.json');         // was in-memory only
-const villainAbilityUsedData = loadData('./villainAbilityUsed.json'); // was in-memory only
-const guardianUpgrades   = loadData('./guardianUpgrades.json');    // was not saved reliably
-const userHPData         = loadData('./userHP.json');              // was in-memory only
-const patrolCooldownData = loadData('./patrolCooldowns.json');     // was in-memory only
-const akumatizationPendingData = loadData('./akumatizationPending.json'); // was in-memory only
+const claimedMiraculous      = loadData('./claimedMiraculous.json');
+const userMiraculous         = loadData('./userMiraculous.json');
+const luckyCharmUsed         = loadData('./luckyCharmUsed.json');
+const powerCooldowns         = loadData('./powerCooldowns.json');
+const stealCooldowns         = loadData('./stealCooldowns.json');
+const userCharms             = loadData('./userCharms.json');
+const userAlignmentData      = loadData('./userAlignment.json');
+const mothModeData           = loadData('./mothMode.json');
+const activeAkumaData        = loadData('./activeAkuma.json');
+const villainAbilityUsedData = loadData('./villainAbilityUsed.json');
+const guardianUpgrades       = loadData('./guardianUpgrades.json');
+const userHPData             = loadData('./userHP.json');
+const patrolCooldownData     = loadData('./patrolCooldowns.json');
+const akumatizationPendingData = loadData('./akumatizationPending.json');
 
-// Wrap in proxy-like objects so existing code using these variable names still works
-// (We just use the loaded objects directly — same reference pattern as before)
-const userAlignment        = userAlignmentData;
-const mothMode             = mothModeData;
-const activeAkuma          = activeAkumaData;
-const villainAbilityUsed   = villainAbilityUsedData;
-const userHP               = userHPData;
-const patrolCooldowns      = patrolCooldownData;
-const akumatizationPending = akumatizationPendingData;
+// ─── Battle System Storage ────────────────────────────────────────────────────
+const activeBattles          = loadData('./activeBattles.json');
+const fleeCooldowns          = loadData('./fleeCooldowns.json');
 
-// ─── Butterfly / Moth Miraculous State ────────────────────────────────────────
-// (now loaded from disk above — no separate declarations needed)
+const userAlignment          = userAlignmentData;
+const mothMode               = mothModeData;
+const activeAkuma            = activeAkumaData;
+const villainAbilityUsed     = villainAbilityUsedData;
+const userHP                 = userHPData;
+const patrolCooldowns        = patrolCooldownData;
+const akumatizationPending   = akumatizationPendingData;
+
+// ─── Save ALL persistent data ─────────────────────────────────────────────────
+function saveAll() {
+  saveData('./claimedMiraculous.json',       claimedMiraculous);
+  saveData('./userMiraculous.json',           userMiraculous);
+  saveData('./luckyCharmUsed.json',           luckyCharmUsed);
+  saveData('./powerCooldowns.json',           powerCooldowns);
+  saveData('./stealCooldowns.json',           stealCooldowns);
+  saveData('./userCharms.json',               userCharms);
+  saveData('./userAlignment.json',            userAlignment);
+  saveData('./mothMode.json',                 mothMode);
+  saveData('./activeAkuma.json',              activeAkuma);
+  saveData('./villainAbilityUsed.json',       villainAbilityUsed);
+  saveData('./guardianUpgrades.json',         guardianUpgrades);
+  saveData('./userHP.json',                   userHP);
+  saveData('./patrolCooldowns.json',          patrolCooldowns);
+  saveData('./akumatizationPending.json',     akumatizationPending);
+  saveData('./activeBattles.json',            activeBattles);
+  saveData('./fleeCooldowns.json',            fleeCooldowns);
+}
 
 // ─── HP System ────────────────────────────────────────────────────────────────
 function getHP(userId) {
@@ -76,6 +99,7 @@ function resetHP(userId) {
 const DETRANSFORM_MS  = 5 * 60 * 1000;
 const RECHARGE_MS     = 4 * 60 * 1000;
 const PATROL_COOLDOWN = 5 * 60 * 1000;
+const FLEE_COOLDOWN   = 4 * 60 * 1000;
 
 function getCharms(userId) {
   return userCharms[userId] || 0;
@@ -516,6 +540,8 @@ function getRandomAmericanMiraculous() {
 }
 
 function findMiraculous(id) {
+  if (!id) return null;
+  if (Array.isArray(id)) id = id[0];
   return miraculousList.find(x => x.id === id) || americanMiraculousList.find(x => x.id === id);
 }
 
@@ -565,12 +591,12 @@ function buildVillainRows(monarchId, targetId) {
 
 // ─── Wipe miraculous — NEVER wipes the owner ──────────────────────────────────
 function wipeMiraculous(userId) {
-  // Protect the owner's data from being wiped
   if (userId === OWNER_ID) return;
-
   const mid = userMiraculous[userId];
   if (mid) {
-    delete claimedMiraculous[mid];
+    const midKey = Array.isArray(mid) ? mid[0] : mid;
+    delete claimedMiraculous[midKey];
+    if (Array.isArray(mid) && mid[1]) delete claimedMiraculous[mid[1]];
     delete userMiraculous[userId];
   }
   delete powerCooldowns[userId];
@@ -581,27 +607,118 @@ function wipeMiraculous(userId) {
   delete userAlignment[userId];
 }
 
-// ─── Save ALL persistent data ─────────────────────────────────────────────────
-function saveAll() {
-  saveData('./claimedMiraculous.json',       claimedMiraculous);
-  saveData('./userMiraculous.json',           userMiraculous);
-  saveData('./luckyCharmUsed.json',           luckyCharmUsed);
-  saveData('./powerCooldowns.json',           powerCooldowns);
-  saveData('./stealCooldowns.json',           stealCooldowns);
-  saveData('./userCharms.json',               userCharms);
-  saveData('./userAlignment.json',            userAlignment);
-  saveData('./mothMode.json',                 mothMode);
-  saveData('./activeAkuma.json',              activeAkuma);
-  saveData('./villainAbilityUsed.json',       villainAbilityUsed);
-  saveData('./guardianUpgrades.json',         guardianUpgrades);
-  saveData('./userHP.json',                   userHP);
-  saveData('./patrolCooldowns.json',          patrolCooldowns);
-  saveData('./akumatizationPending.json',     akumatizationPending);
+// ─── Battle System Helpers ────────────────────────────────────────────────────
+
+/**
+ * activeBattles[battleId] = {
+ *   attackerId, attackerName, defenderId, defenderName,
+ *   attackerMid, defenderMid,
+ *   turn: 'attacker' | 'defender',
+ *   attackerHP, defenderHP,
+ *   channelId, guildId,
+ *   pendingDamage: number (damage set by attacker, waiting for defender action)
+ * }
+ */
+
+function getBattleId(uid1, uid2) {
+  return [uid1, uid2].sort().join('_');
+}
+
+function buildBattleActionRow(battleId, actorId, role) {
+  // role: 'attacker' or 'defender'
+  const attackBtn = new ButtonBuilder()
+    .setCustomId(`battle_attack__${battleId}__${actorId}__${role}`)
+    .setLabel('⚔️ Attack')
+    .setStyle(ButtonStyle.Danger);
+  const defendBtn = new ButtonBuilder()
+    .setCustomId(`battle_defend__${battleId}__${actorId}__${role}`)
+    .setLabel('🛡️ Defend')
+    .setStyle(ButtonStyle.Primary);
+  const fleeBtn = new ButtonBuilder()
+    .setCustomId(`battle_flee__${battleId}__${actorId}__${role}`)
+    .setLabel('💨 Flee')
+    .setStyle(ButtonStyle.Secondary);
+  return new ActionRowBuilder().addComponents(attackBtn, defendBtn, fleeBtn);
+}
+
+function buildBattleEmbed(battle, title, description, color) {
+  const attackerM = findMiraculous(battle.attackerMid);
+  const defenderM = findMiraculous(battle.defenderMid);
+  const aBar = '█'.repeat(Math.round(battle.attackerHP / 10)) + '░'.repeat(10 - Math.round(battle.attackerHP / 10));
+  const dBar = '█'.repeat(Math.round(battle.defenderHP / 10)) + '░'.repeat(10 - Math.round(battle.defenderHP / 10));
+  return new EmbedBuilder()
+    .setColor(color || 0xFF4444)
+    .setTitle(title)
+    .setDescription(
+      `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
+      `${attackerM?.emoji || '⚔️'} **${battle.attackerName}** (Attacker)\n` +
+      `❤️ HP: **${battle.attackerHP}/100** [${aBar}]\n\n` +
+      `${defenderM?.emoji || '🛡️'} **${battle.defenderName}** (Defender)\n` +
+      `❤️ HP: **${battle.defenderHP}/100** [${dBar}]\n\n` +
+      (description ? `─────────────────────────────\n${description}\n` : '') +
+      `\n﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
+    )
+    .setTimestamp();
+}
+
+async function processBattleDeath(loserUserId, winnerUserId, loserName, winnerName, channel) {
+  // Loser loses Miraculous and 25% Charms
+  const loserMid = userMiraculous[loserUserId];
+  const loserM = findMiraculous(loserMid);
+  const loserCharmsBefore = getCharms(loserUserId);
+  const charmsLost = Math.floor(loserCharmsBefore * 0.25);
+
+  if (loserUserId !== OWNER_ID) {
+    // Remove miraculous
+    if (loserMid) {
+      const midKey = Array.isArray(loserMid) ? loserMid[0] : loserMid;
+      delete claimedMiraculous[midKey];
+      if (Array.isArray(loserMid) && loserMid[1]) delete claimedMiraculous[loserMid[1]];
+      delete userMiraculous[loserUserId];
+    }
+    // Remove 25% charms
+    userCharms[loserUserId] = Math.max(0, loserCharmsBefore - charmsLost);
+    // Reset HP
+    resetHP(loserUserId);
+    // Clear battle cooldowns
+    delete powerCooldowns[loserUserId];
+  }
+
+  saveAll();
+
+  const embed = new EmbedBuilder()
+    .setColor(0x000000)
+    .setTitle('💀 BATTLE OVER — DEFEAT')
+    .setDescription(
+      `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
+      `⚔️ **Winner:** ${winnerName}\n` +
+      `💀 **Defeated:** ${loserName}\n\n` +
+      `**Consequences for ${loserName}:**\n` +
+      `➜ ${loserM ? `${loserM.emoji} **${loserM.animal} Miraculous** — **LOST**` : 'No Miraculous to lose'}\n` +
+      `➜ **${charmsLost} Charms** lost *(25% penalty)*\n` +
+      `➜ HP reset to **100**\n\n` +
+      `*The battle is over. The city watches.*\n\n` +
+      `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
+    )
+    .setTimestamp();
+
+  try {
+    await channel.send({ embeds: [embed] });
+    const loserUser = await channel.client.users.fetch(loserUserId).catch(() => null);
+    if (loserUser) {
+      await loserUser.send(
+        `💀 **You were defeated by ${winnerName}!**\n\n` +
+        `➜ Your ${loserM ? loserM.animal + ' Miraculous has been lost.' : 'Miraculous (if any) has been lost.'}\n` +
+        `➜ You lost **${charmsLost} Charms** (25% penalty).\n` +
+        `➜ Your HP has been reset to 100.`
+      ).catch(() => {});
+    }
+  } catch (e) { console.error('Death message error:', e); }
 }
 
 // ─── Discord Client ────────────────────────────────────────────────────────────
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent,]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent]
 });
 
 client.once('ready', async () => {
@@ -678,25 +795,17 @@ client.once('ready', async () => {
       .setName('charms')
       .setDescription('Add Charms to a user')
       .addUserOption(o =>
-        o.setName('user')
-          .setDescription('User to give Charms to')
-          .setRequired(true))
+        o.setName('user').setDescription('User to give Charms to').setRequired(true))
       .addIntegerOption(o =>
-        o.setName('amount')
-          .setDescription('Amount of Charms')
-          .setRequired(true)),
+        o.setName('amount').setDescription('Amount of Charms').setRequired(true)),
 
     new SlashCommandBuilder()
       .setName('givemiraculous')
       .setDescription('Give a specific Miraculous to a user')
       .addUserOption(o =>
-        o.setName('user')
-          .setDescription('Target user')
-          .setRequired(true))
+        o.setName('user').setDescription('Target user').setRequired(true))
       .addStringOption(o =>
-        o.setName('miraculous')
-          .setDescription('Miraculous to give')
-          .setRequired(true)
+        o.setName('miraculous').setDescription('Miraculous to give').setRequired(true)
           .addChoices(
             { name: 'Creation', value: 'creation' },
             { name: 'Destruction', value: 'destruction' },
@@ -720,9 +829,7 @@ client.once('ready', async () => {
       .setName('check')
       .setDescription('Check who owns a Miraculous')
       .addStringOption(o =>
-        o.setName('miraculous')
-          .setDescription('Miraculous to check')
-          .setRequired(true)
+        o.setName('miraculous').setDescription('Miraculous to check').setRequired(true)
           .addChoices(
             { name: 'Creation', value: 'creation' },
             { name: 'Destruction', value: 'destruction' },
@@ -746,9 +853,7 @@ client.once('ready', async () => {
       .setName('steal')
       .setDescription('Attempt to steal a Miraculous')
       .addUserOption(o =>
-        o.setName('user')
-          .setDescription('Target user')
-          .setRequired(true)),
+        o.setName('user').setDescription('Target user').setRequired(true)),
 
   ].map(c => c.toJSON());
 
@@ -866,6 +971,7 @@ client.on('interactionCreate', async interaction => {
     const first = userMiraculous[interaction.user.id];
     claimedMiraculous[second.id] = { userId: interaction.user.id, username: interaction.user.username };
     userMiraculous[interaction.user.id] = [first, second.id];
+    saveAll();
     const firstM = findMiraculous(first);
     const embed = new EmbedBuilder()
       .setColor(0x9400D3)
@@ -1019,6 +1125,7 @@ client.on('interactionCreate', async interaction => {
     const earned = Math.floor(Math.random() * 401) + 100;
     addCharms(interaction.user.id, earned);
     patrolCooldowns[interaction.user.id] = now;
+    saveData('./patrolCooldowns.json', patrolCooldowns);
     const m = findMiraculous(mid);
     const patrolMessages = [
       `You swept across the rooftops, protected three civilians, and stopped a runaway vehicle.`,
@@ -1103,7 +1210,6 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ content: "You cannot steal from yourself.", ephemeral: true });
       return;
     }
-    // Prevent stealing from the owner
     if (target.id === OWNER_ID) {
       await interaction.reply({ content: "You cannot steal from the Guardian.", ephemeral: true });
       return;
@@ -1119,31 +1225,24 @@ client.on('interactionCreate', async interaction => {
       return;
     }
     let chance = 40;
-    switch (targetMc) {
-      case 'creation':
-      case 'destruction':
-        chance = 15; break;
-      case 'prodigious':
-        chance = 5; break;
-      case 'transmission':
-      case 'emotion':
-        chance = 20; break;
-      case 'am_thunderbird':
-        chance = 8; break;
-      case 'am_eagle':
-        chance = 12; break;
-      default:
-        chance = 40;
+    const mcKey = Array.isArray(targetMc) ? targetMc[0] : targetMc;
+    switch (mcKey) {
+      case 'creation': case 'destruction': chance = 15; break;
+      case 'prodigious': chance = 5; break;
+      case 'transmission': case 'emotion': chance = 20; break;
+      case 'am_thunderbird': chance = 8; break;
+      case 'am_eagle': chance = 12; break;
+      default: chance = 40;
     }
     stealCooldowns[interaction.user.id] = now + (15 * 60 * 1000);
     saveData('./stealCooldowns.json', stealCooldowns);
     const roll = Math.random() * 100;
     if (roll <= chance) {
+      const stealMid = Array.isArray(targetMc) ? targetMc[0] : targetMc;
       delete userMiraculous[target.id];
-      claimedMiraculous[targetMc] = { userId: interaction.user.id, username: interaction.user.username };
-      userMiraculous[interaction.user.id] = targetMc;
-      saveData('./userMiraculous.json', userMiraculous);
-      saveData('./claimedMiraculous.json', claimedMiraculous);
+      claimedMiraculous[stealMid] = { userId: interaction.user.id, username: interaction.user.username };
+      userMiraculous[interaction.user.id] = stealMid;
+      saveAll();
       const embed = new EmbedBuilder()
         .setColor(0x00FF99)
         .setTitle('🦹 MIRACULOUS STOLEN')
@@ -1198,6 +1297,7 @@ client.on('interactionCreate', async interaction => {
     } else {
       userMiraculous[target.id] = mid;
     }
+    saveAll();
     const embed = new EmbedBuilder()
       .setColor(miraculous?.color || 0x7B2FBE)
       .setTitle('🎁 MIRACULOUS GRANTED')
@@ -1265,7 +1365,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
-  //   /usepower
+  //   /usepower — NOW INITIATES TURN-BASED BATTLE FOR DAMAGE POWERS
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'usepower') {
     const mid = userMiraculous[interaction.user.id];
@@ -1295,7 +1395,6 @@ client.on('interactionCreate', async interaction => {
       const mode = mothMode[interaction.user.id];
       const channel = interaction.channel;
 
-      // ── CHRYSALIS ────────────────────────────────────────────────────────────
       if (mode === 'chrysalis') {
         await interaction.reply({
           content: `🦋 Choose a villain form to give to **${target.username}**:`,
@@ -1305,7 +1404,6 @@ client.on('interactionCreate', async interaction => {
         return;
       }
 
-      // ── BETTERFLY ────────────────────────────────────────────────────────────
       if (mode === 'betterfly') {
         await interaction.reply({ content: `✨ *A butterfly of light rises...*\n**"Fly away my akuma, and evilize... wait — no."** *Kamiko!*` });
         setTimeout(async () => {
@@ -1316,6 +1414,7 @@ client.on('interactionCreate', async interaction => {
               setTimeout(async () => {
                 await channel.send(`🦋 **Betterfly:** *"I only work for the greater good, like you Celesticat. Do you accept this gift I am offering you for the greater good?"*`);
                 akumatizationPending[target.id] = { monarchId: interaction.user.id, villain: null, mode: 'betterfly' };
+                saveData('./akumatizationPending.json', akumatizationPending);
                 const acceptBtn = new ButtonBuilder().setCustomId(`bfly_yes__${interaction.user.id}__${target.id}`).setLabel('I do').setStyle(ButtonStyle.Primary);
                 const rejectBtn = new ButtonBuilder().setCustomId(`bfly_no__${interaction.user.id}__${target.id}`).setLabel('No..!').setStyle(ButtonStyle.Danger);
                 await channel.send({ content: `<@${target.id}> — what is your answer?`, components: [new ActionRowBuilder().addComponents(acceptBtn, rejectBtn)] });
@@ -1338,7 +1437,120 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
+    // ── CHECK IF ALREADY IN BATTLE ────────────────────────────────────────────
+    const existingBattle = Object.values(activeBattles).find(
+      b => b.attackerId === interaction.user.id || b.defenderId === interaction.user.id
+    );
+    if (existingBattle) {
+      await interaction.reply({ content: "⚔️ You are already in a battle! Finish your current fight first.", ephemeral: true });
+      return;
+    }
+
+    // ── DAMAGE POWERS → START TURN-BASED BATTLE ───────────────────────────────
+    if (m.targetEffect === 'damage') {
+      const targetMid = userMiraculous[target.id];
+      if (!targetMid) {
+        await interaction.reply({ content: `⚠️ **${target.username}** doesn't have a Miraculous — they cannot be challenged to battle.`, ephemeral: true });
+        return;
+      }
+
+      // Check flee cooldown for attacker
+      if (fleeCooldowns[interaction.user.id] && now < fleeCooldowns[interaction.user.id]) {
+        await interaction.reply({ content: `💨 You fled recently! You cannot start a battle for another **${formatTime(fleeCooldowns[interaction.user.id] - now)}**.`, ephemeral: true });
+        return;
+      }
+
+      // Check if target is already in a battle
+      const targetBattle = Object.values(activeBattles).find(
+        b => b.attackerId === target.id || b.defenderId === target.id
+      );
+      if (targetBattle) {
+        await interaction.reply({ content: `⚔️ **${target.username}** is already in a battle!`, ephemeral: true });
+        return;
+      }
+
+      // Set power cooldown
+      powerCooldowns[interaction.user.id] = { transformBack: now + DETRANSFORM_MS };
+      saveData('./powerCooldowns.json', powerCooldowns);
+
+      setTimeout(() => {
+        powerCooldowns[interaction.user.id] = { rechargeUntil: Date.now() + RECHARGE_MS };
+        saveData('./powerCooldowns.json', powerCooldowns);
+        client.users.fetch(interaction.user.id).then(u =>
+          u.send(`⏰ **${interaction.user.username}**, you have detransformed! Wait **4 minutes** before using your power again.`).catch(() => {})
+        ).catch(() => {});
+      }, DETRANSFORM_MS);
+
+      setTimeout(() => {
+        delete powerCooldowns[interaction.user.id];
+        saveData('./powerCooldowns.json', powerCooldowns);
+        client.users.fetch(interaction.user.id).then(u =>
+          u.send(`✅ **${interaction.user.username}**, your Miraculous is recharged! You can use **${m.power}** again.`).catch(() => {})
+        ).catch(() => {});
+      }, DETRANSFORM_MS + RECHARGE_MS);
+
+      // Calculate initial attacker damage
+      const damageMin = m.damageMin || 10;
+      const damageMax = m.damageMax || 40;
+      const initialDamage = Math.floor(Math.random() * (damageMax - damageMin + 1)) + damageMin;
+      const missRoll = Math.random() * 100;
+      const missChance = m.missChance || 20;
+
+      const battleId = getBattleId(interaction.user.id, target.id);
+      activeBattles[battleId] = {
+        attackerId: interaction.user.id,
+        attackerName: interaction.user.username,
+        defenderId: target.id,
+        defenderName: target.username,
+        attackerMid: Array.isArray(mid) ? mid[0] : mid,
+        defenderMid: Array.isArray(targetMid) ? targetMid[0] : targetMid,
+        turn: 'defender', // Attacker already attacked — now defender responds
+        attackerHP: getHP(interaction.user.id),
+        defenderHP: getHP(target.id),
+        pendingDamage: missRoll < missChance ? 0 : initialDamage,
+        attackerDefending: false,
+        defenderDefending: false,
+        channelId: interaction.channelId,
+        guildId: interaction.guildId
+      };
+      saveData('./activeBattles.json', activeBattles);
+
+      const attackerM = m;
+      const defenderM = findMiraculous(targetMid);
+
+      const missed = missRoll < missChance;
+      const flavor = missed
+        ? (m.missFlavor || `The attack missed ${target.username}.`).replace('{target}', target.username)
+        : (m.targetFlavor || `The attack hit ${target.username}.`).replace('{target}', target.username);
+
+      const battleEmbed = new EmbedBuilder()
+        .setColor(missed ? 0x888888 : attackerM.color)
+        .setTitle(`⚔️ BATTLE BEGINS — ${interaction.user.username} vs ${target.username}`)
+        .setDescription(
+          `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
+          `${attackerM.emoji} **${interaction.user.username}** uses **${m.power}**!\n\n` +
+          `*${flavor}*\n\n` +
+          `${missed ? `➜ **Result:** 💨 MISS — no damage dealt!\n` : `➜ **Damage incoming:** ⚡ **${initialDamage} HP**\n`}` +
+          `\n─────────────────────────────\n` +
+          `${attackerM.emoji} **${interaction.user.username}** HP: **${getHP(interaction.user.id)}/100**\n` +
+          `${defenderM?.emoji || '🛡️'} **${target.username}** HP: **${getHP(target.id)}/100**\n\n` +
+          `➜ **${target.username}'s turn!** Choose your response:\n` +
+          `⚔️ **Attack** — strike back\n` +
+          `🛡️ **Defend** — reduce incoming damage by 60%\n` +
+          `💨 **Flee** — end the battle (4 min cooldown)\n\n` +
+          `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
+        )
+        .setTimestamp();
+
+      const actionRow = buildBattleActionRow(battleId, target.id, 'defender');
+      await interaction.reply({ embeds: [battleEmbed], components: [actionRow] });
+      return;
+    }
+
+    // ── NON-BATTLE POWERS (heal, timeout, flavor, lucky_charm) ────────────────
     powerCooldowns[interaction.user.id] = { transformBack: now + DETRANSFORM_MS };
+    saveData('./powerCooldowns.json', powerCooldowns);
+
     setTimeout(async () => {
       try {
         const u = await client.users.fetch(interaction.user.id);
@@ -1347,12 +1559,14 @@ client.on('interactionCreate', async interaction => {
     }, 100);
     setTimeout(() => {
       powerCooldowns[interaction.user.id] = { rechargeUntil: Date.now() + RECHARGE_MS };
+      saveData('./powerCooldowns.json', powerCooldowns);
       client.users.fetch(interaction.user.id).then(u =>
         u.send("⏰ **" + interaction.user.username + "**, you have detransformed! Wait **4 minutes** before using your power again.").catch(() => {})
       ).catch(() => {});
     }, DETRANSFORM_MS);
     setTimeout(() => {
       delete powerCooldowns[interaction.user.id];
+      saveData('./powerCooldowns.json', powerCooldowns);
       client.users.fetch(interaction.user.id).then(u =>
         u.send("✅ **" + interaction.user.username + "**, your Miraculous is recharged! You can use **" + m.power + "** again.").catch(() => {})
       ).catch(() => {});
@@ -1373,6 +1587,7 @@ client.on('interactionCreate', async interaction => {
       }
       if (!luckyCharmUsed[interaction.user.id]) {
         luckyCharmUsed[interaction.user.id] = true;
+        saveData('./luckyCharmUsed.json', luckyCharmUsed);
         const obj = luckyObjects[Math.floor(Math.random() * luckyObjects.length)];
         await interaction.reply({
           embeds: [new EmbedBuilder()
@@ -1389,6 +1604,7 @@ client.on('interactionCreate', async interaction => {
         });
       } else {
         luckyCharmUsed[interaction.user.id] = false;
+        saveData('./luckyCharmUsed.json', luckyCharmUsed);
         await interaction.reply({
           embeds: [new EmbedBuilder()
             .setColor(0xFF0000).setTitle("🐞  MIRACULOUS CURE — RELEASED").setDescription("⋆ ━━━━━━━━━━━━━━━━━━━━━━ ⋆")
@@ -1423,6 +1639,7 @@ client.on('interactionCreate', async interaction => {
       const oldHP = getHP(target.id);
       const newHP = Math.min(100, oldHP + healAmt);
       userHP[target.id] = newHP;
+      saveData('./userHP.json', userHP);
       const flavor = m.targetFlavor.replace('{target}', target.username);
       await interaction.reply({
         embeds: [new EmbedBuilder()
@@ -1441,98 +1658,6 @@ client.on('interactionCreate', async interaction => {
       try {
         const tu = await client.users.fetch(target.id);
         await tu.send(`💚 **${interaction.user.username}** used **${m.power}** on you! You recovered **+${newHP - oldHP} HP**. Current HP: **${newHP}/100**`);
-      } catch (e) {}
-      return;
-    }
-
-    // ─── DAMAGE ───────────────────────────────────────────────────────────────
-    if (m.targetEffect === "damage") {
-      const missRoll = Math.random() * 100;
-      const killRoll = Math.random() * 100;
-      const missChance = m.missChance || 20;
-      const killChance = m.killChance || 0;
-      const damageMin = m.damageMin || 10;
-      const damageMax = m.damageMax || 40;
-
-      if (missRoll < missChance) {
-        const missText = (m.missFlavor || `The attack missed {target} entirely.`).replace('{target}', target.username);
-        await interaction.reply({
-          embeds: [new EmbedBuilder()
-            .setColor(m.color)
-            .setTitle(`${m.emoji}  ${m.power} — MISSED`)
-            .setDescription(
-              `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
-              `*${missText}*\n\n` +
-              `➜ **Holder:** ${interaction.user.username}\n` +
-              `➜ **Target:** ${target.username}\n` +
-              `➜ **Result:** 💨 **MISS**\n\n` +
-              `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
-            )
-            .setTimestamp()]
-        });
-        return;
-      }
-
-      const damage = Math.floor(Math.random() * (damageMax - damageMin + 1)) + damageMin;
-      const targetCurrentHP = getHP(target.id);
-      const targetNewHP = applyDamage(target.id, damage);
-
-      const hpKill = targetNewHP <= 0;
-      const rollKill = killChance > 0 && killRoll < killChance;
-
-      if (hpKill || rollKill) {
-        const killText = (m.killFlavor || `{target} was defeated by the attack.`).replace('{target}', target.username);
-        resetHP(target.id);
-
-        await interaction.reply({
-          embeds: [new EmbedBuilder()
-            .setColor(0x000000)
-            .setTitle(`${m.emoji}  ${m.power} — LETHAL HIT 💀`)
-            .setDescription(
-              `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
-              `*${killText}*\n\n` +
-              `➜ **Attacker:** ${interaction.user.username}\n` +
-              `➜ **Target:** ${target.username}\n` +
-              `➜ **Damage Dealt:** ${damage} HP\n` +
-              `➜ **Result:** 💀 **DEFEATED** *(HP reset to 100)*\n` +
-              `➜ **Miraculous:** *Retained — the holder lives to fight another day*\n` +
-              `\n﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
-            )
-            .setTimestamp()]
-        });
-
-        try {
-          const defeatedUser = await client.users.fetch(target.id);
-          await defeatedUser.send(
-            `💀 **You have been defeated by ${interaction.user.username}!**\n\n` +
-            `${m.emoji} *Their **${m.power}** struck you down for ${damage} damage.*\n\n` +
-            `Your HP has been reset to **100**. Your Miraculous remains with you.`
-          );
-        } catch (e) {}
-        return;
-      }
-
-      const flavor = (m.targetFlavor || `The attack hit {target}.`).replace('{target}', target.username);
-      await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(m.color)
-          .setTitle(`${m.emoji}  ${m.power} — HIT`)
-          .setDescription(
-            `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
-            `*${flavor}*\n\n` +
-            `➜ **Holder:** ${interaction.user.username}\n` +
-            `➜ **Target:** ${target.username}\n` +
-            `➜ **Damage:** ${damage} HP\n` +
-            `➜ **Target HP:** ${targetNewHP}/100\n` +
-            `➜ **Result:** ⚡ **HIT**\n` +
-            `➜ **Detransform:** ${discordTimestamp}\n\n` +
-            `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
-          )
-          .setTimestamp()]
-      });
-      try {
-        const hitUser = await client.users.fetch(target.id);
-        await hitUser.send(`⚡ **${interaction.user.username}** used **${m.power}** on you! You took **${damage} damage**. Current HP: **${targetNewHP}/100**`);
       } catch (e) {}
       return;
     }
@@ -1605,6 +1730,250 @@ client.on('interactionCreate', async interaction => {
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
+  //   BATTLE BUTTONS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  // ─── BATTLE: ATTACK ───────────────────────────────────────────────────────────
+  if (interaction.isButton() && interaction.customId.startsWith('battle_attack__')) {
+    const parts = interaction.customId.split('__');
+    const battleId = parts[1];
+    const actorId = parts[2];
+    const role = parts[3]; // 'attacker' or 'defender'
+
+    if (interaction.user.id !== actorId) {
+      await interaction.reply({ content: "This isn't your turn!", ephemeral: true });
+      return;
+    }
+
+    const battle = activeBattles[battleId];
+    if (!battle) {
+      await interaction.reply({ content: "This battle no longer exists.", ephemeral: true });
+      return;
+    }
+
+    // Apply pending damage from the previous turn first (if any)
+    if (role === 'defender' && battle.pendingDamage > 0) {
+      battle.defenderHP = Math.max(0, battle.defenderHP - battle.pendingDamage);
+      userHP[battle.defenderId] = battle.defenderHP;
+    } else if (role === 'attacker' && battle.pendingDamage > 0) {
+      battle.attackerHP = Math.max(0, battle.attackerHP - battle.pendingDamage);
+      userHP[battle.attackerId] = battle.attackerHP;
+    }
+
+    // Check if the person responding has been killed by the pending damage
+    const respondingHP = role === 'defender' ? battle.defenderHP : battle.attackerHP;
+    if (respondingHP <= 0) {
+      // They died from the pending damage
+      const loserId = role === 'defender' ? battle.defenderId : battle.attackerId;
+      const winnerId = role === 'defender' ? battle.attackerId : battle.defenderId;
+      const loserName = role === 'defender' ? battle.defenderName : battle.attackerName;
+      const winnerName = role === 'defender' ? battle.attackerName : battle.defenderName;
+      delete activeBattles[battleId];
+      saveAll();
+      await interaction.update({ components: [] });
+      await processBattleDeath(loserId, winnerId, loserName, winnerName, interaction.channel);
+      return;
+    }
+
+    // Now calculate the counter-attack
+    const actorMid = role === 'defender' ? battle.defenderMid : battle.attackerMid;
+    const actorM = findMiraculous(actorMid);
+    const damageMin = actorM?.damageMin || 10;
+    const damageMax = actorM?.damageMax || 40;
+    const newDamage = Math.floor(Math.random() * (damageMax - damageMin + 1)) + damageMin;
+    const missRoll = Math.random() * 100;
+    const missChance = actorM?.missChance || 20;
+    const missed = missRoll < missChance;
+
+    // Store the new pending damage and flip turn
+    battle.pendingDamage = missed ? 0 : newDamage;
+    battle.turn = role === 'defender' ? 'attacker' : 'defender';
+
+    const opponentId = role === 'defender' ? battle.attackerId : battle.defenderId;
+    const opponentName = role === 'defender' ? battle.attackerName : battle.defenderName;
+    const opponentRole = role === 'defender' ? 'attacker' : 'defender';
+    const opponentMid = role === 'defender' ? battle.attackerMid : battle.defenderMid;
+    const opponentM = findMiraculous(opponentMid);
+
+    const actorCurrentHP = role === 'defender' ? battle.defenderHP : battle.attackerHP;
+    const opponentCurrentHP = role === 'defender' ? battle.attackerHP : battle.defenderHP;
+
+    const aBar = '█'.repeat(Math.round(battle.attackerHP / 10)) + '░'.repeat(10 - Math.round(battle.attackerHP / 10));
+    const dBar = '█'.repeat(Math.round(battle.defenderHP / 10)) + '░'.repeat(10 - Math.round(battle.defenderHP / 10));
+
+    const battleEmbed = new EmbedBuilder()
+      .setColor(missed ? 0x888888 : (actorM?.color || 0xFF4444))
+      .setTitle(`⚔️ BATTLE — ${battle.attackerName} vs ${battle.defenderName}`)
+      .setDescription(
+        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
+        `${actorM?.emoji || '⚔️'} **${interaction.user.username}** attacks!\n` +
+        (missed
+          ? `*${(actorM?.missFlavor || 'The attack missed!').replace('{target}', opponentName)}*\n➜ 💨 **MISS**\n`
+          : `*${(actorM?.targetFlavor || 'The attack hits!').replace('{target}', opponentName)}*\n➜ ⚡ **${newDamage} damage incoming**\n`) +
+        `\n─────────────────────────────\n` +
+        `${findMiraculous(battle.attackerMid)?.emoji || '⚔️'} **${battle.attackerName}** HP: **${battle.attackerHP}/100** [${aBar}]\n` +
+        `${findMiraculous(battle.defenderMid)?.emoji || '🛡️'} **${battle.defenderName}** HP: **${battle.defenderHP}/100** [${dBar}]\n\n` +
+        `➜ **${opponentName}'s turn!** Choose your response:\n` +
+        `⚔️ **Attack** — strike back\n` +
+        `🛡️ **Defend** — reduce incoming damage by 60%\n` +
+        `💨 **Flee** — end the battle (4 min cooldown)\n\n` +
+        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
+      )
+      .setTimestamp();
+
+    saveBattleAndHP(battle, battleId);
+
+    const actionRow = buildBattleActionRow(battleId, opponentId, opponentRole);
+    await interaction.update({ embeds: [battleEmbed], components: [actionRow] });
+    return;
+  }
+
+  // ─── BATTLE: DEFEND ──────────────────────────────────────────────────────────
+  if (interaction.isButton() && interaction.customId.startsWith('battle_defend__')) {
+    const parts = interaction.customId.split('__');
+    const battleId = parts[1];
+    const actorId = parts[2];
+    const role = parts[3];
+
+    if (interaction.user.id !== actorId) {
+      await interaction.reply({ content: "This isn't your turn!", ephemeral: true });
+      return;
+    }
+
+    const battle = activeBattles[battleId];
+    if (!battle) {
+      await interaction.reply({ content: "This battle no longer exists.", ephemeral: true });
+      return;
+    }
+
+    // Apply pending damage with 60% reduction
+    const reducedDamage = Math.floor(battle.pendingDamage * 0.4); // 60% reduction
+    if (role === 'defender') {
+      battle.defenderHP = Math.max(0, battle.defenderHP - reducedDamage);
+      userHP[battle.defenderId] = battle.defenderHP;
+    } else {
+      battle.attackerHP = Math.max(0, battle.attackerHP - reducedDamage);
+      userHP[battle.attackerId] = battle.attackerHP;
+    }
+
+    // Check death after defended hit
+    const respondingHP = role === 'defender' ? battle.defenderHP : battle.attackerHP;
+    if (respondingHP <= 0) {
+      const loserId = role === 'defender' ? battle.defenderId : battle.attackerId;
+      const winnerId = role === 'defender' ? battle.attackerId : battle.defenderId;
+      const loserName = role === 'defender' ? battle.defenderName : battle.attackerName;
+      const winnerName = role === 'defender' ? battle.attackerName : battle.defenderName;
+      delete activeBattles[battleId];
+      saveAll();
+      await interaction.update({ components: [] });
+      await processBattleDeath(loserId, winnerId, loserName, winnerName, interaction.channel);
+      return;
+    }
+
+    // Now the defender counter-attacks (0 pending damage since they defended)
+    const actorMid = role === 'defender' ? battle.defenderMid : battle.attackerMid;
+    const actorM = findMiraculous(actorMid);
+    const damageMin = actorM?.damageMin || 10;
+    const damageMax = actorM?.damageMax || 40;
+    const counterDamage = Math.floor(Math.random() * (damageMax - damageMin + 1)) + damageMin;
+    const missRoll = Math.random() * 100;
+    const missChance = actorM?.missChance || 20;
+    const missed = missRoll < missChance;
+
+    battle.pendingDamage = missed ? 0 : counterDamage;
+    battle.turn = role === 'defender' ? 'attacker' : 'defender';
+
+    const opponentId = role === 'defender' ? battle.attackerId : battle.defenderId;
+    const opponentName = role === 'defender' ? battle.attackerName : battle.defenderName;
+    const opponentRole = role === 'defender' ? 'attacker' : 'defender';
+
+    const aBar = '█'.repeat(Math.round(battle.attackerHP / 10)) + '░'.repeat(10 - Math.round(battle.attackerHP / 10));
+    const dBar = '█'.repeat(Math.round(battle.defenderHP / 10)) + '░'.repeat(10 - Math.round(battle.defenderHP / 10));
+
+    const battleEmbed = new EmbedBuilder()
+      .setColor(0x4488FF)
+      .setTitle(`🛡️ BATTLE — ${battle.attackerName} vs ${battle.defenderName}`)
+      .setDescription(
+        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
+        `🛡️ **${interaction.user.username}** defends!\n` +
+        `*They brace against the incoming strike — damage reduced by 60%!*\n` +
+        `➜ Took **${reducedDamage} damage** (reduced from ${battle.pendingDamage > 0 ? Math.ceil(battle.pendingDamage / 0.4) : 0})\n\n` +
+        (missed
+          ? `⚔️ Counter-attack: 💨 **MISS**\n`
+          : `⚔️ Counter-attack: **${counterDamage} damage incoming** to **${opponentName}**\n`) +
+        `\n─────────────────────────────\n` +
+        `${findMiraculous(battle.attackerMid)?.emoji || '⚔️'} **${battle.attackerName}** HP: **${battle.attackerHP}/100** [${aBar}]\n` +
+        `${findMiraculous(battle.defenderMid)?.emoji || '🛡️'} **${battle.defenderName}** HP: **${battle.defenderHP}/100** [${dBar}]\n\n` +
+        `➜ **${opponentName}'s turn!** Choose your response:\n` +
+        `⚔️ **Attack** — strike back\n` +
+        `🛡️ **Defend** — reduce incoming damage by 60%\n` +
+        `💨 **Flee** — end the battle (4 min cooldown)\n\n` +
+        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
+      )
+      .setTimestamp();
+
+    saveBattleAndHP(battle, battleId);
+
+    const actionRow = buildBattleActionRow(battleId, opponentId, opponentRole);
+    await interaction.update({ embeds: [battleEmbed], components: [actionRow] });
+    return;
+  }
+
+  // ─── BATTLE: FLEE ─────────────────────────────────────────────────────────────
+  if (interaction.isButton() && interaction.customId.startsWith('battle_flee__')) {
+    const parts = interaction.customId.split('__');
+    const battleId = parts[1];
+    const actorId = parts[2];
+    const role = parts[3];
+
+    if (interaction.user.id !== actorId) {
+      await interaction.reply({ content: "This isn't your turn!", ephemeral: true });
+      return;
+    }
+
+    const battle = activeBattles[battleId];
+    if (!battle) {
+      await interaction.reply({ content: "This battle no longer exists.", ephemeral: true });
+      return;
+    }
+
+    // Apply flee cooldown to the fleeing person
+    fleeCooldowns[interaction.user.id] = Date.now() + FLEE_COOLDOWN;
+    saveData('./fleeCooldowns.json', fleeCooldowns);
+
+    const opponentId = role === 'defender' ? battle.attackerId : battle.defenderId;
+    const opponentName = role === 'defender' ? battle.attackerName : battle.defenderName;
+
+    // Save current HP back to the actual HP store
+    userHP[battle.attackerId] = battle.attackerHP;
+    userHP[battle.defenderId] = battle.defenderHP;
+
+    delete activeBattles[battleId];
+    saveAll();
+
+    const aBar = '█'.repeat(Math.round(battle.attackerHP / 10)) + '░'.repeat(10 - Math.round(battle.attackerHP / 10));
+    const dBar = '█'.repeat(Math.round(battle.defenderHP / 10)) + '░'.repeat(10 - Math.round(battle.defenderHP / 10));
+
+    const fleeEmbed = new EmbedBuilder()
+      .setColor(0xAAAAAA)
+      .setTitle(`💨 BATTLE ENDED — FLEE`)
+      .setDescription(
+        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
+        `**${interaction.user.username}** has fled the battle!\n\n` +
+        `*${interaction.user.username} vanishes into the shadows, living to fight another day...*\n\n` +
+        `─────────────────────────────\n` +
+        `${findMiraculous(battle.attackerMid)?.emoji || '⚔️'} **${battle.attackerName}** final HP: **${battle.attackerHP}/100** [${aBar}]\n` +
+        `${findMiraculous(battle.defenderMid)?.emoji || '🛡️'} **${battle.defenderName}** final HP: **${battle.defenderHP}/100** [${dBar}]\n\n` +
+        `⏳ **${interaction.user.username}** cannot start or join another battle for **4 minutes**.\n\n` +
+        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
+      )
+      .setTimestamp();
+
+    await interaction.update({ embeds: [fleeEmbed], components: [] });
+    return;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
   //   /gift
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'gift') {
@@ -1614,18 +1983,20 @@ client.on('interactionCreate', async interaction => {
     if (recipient.id === interaction.user.id) { await interaction.reply({ content: "You cannot give a Miraculous to yourself.", ephemeral: true }); return; }
     if (userMiraculous[recipient.id]) {
       const theirM = findMiraculous(userMiraculous[recipient.id]);
-      await interaction.reply({ content: recipient.username + " already holds the " + theirM.animal + " Miraculous.", ephemeral: true });
+      await interaction.reply({ content: recipient.username + " already holds the " + (theirM?.animal || 'Unknown') + " Miraculous.", ephemeral: true });
       return;
     }
     const m = findMiraculous(mid);
+    const midKey = Array.isArray(mid) ? mid[0] : mid;
     const line = giftLines[Math.floor(Math.random() * giftLines.length)];
-    delete claimedMiraculous[mid];
+    delete claimedMiraculous[midKey];
     delete userMiraculous[interaction.user.id];
     delete powerCooldowns[interaction.user.id];
     delete mothMode[interaction.user.id];
     delete activeAkuma[interaction.user.id];
-    claimedMiraculous[mid] = { userId: recipient.id, username: recipient.username };
-    userMiraculous[recipient.id] = mid;
+    claimedMiraculous[midKey] = { userId: recipient.id, username: recipient.username };
+    userMiraculous[recipient.id] = midKey;
+    saveAll();
     await interaction.reply({
       embeds: [new EmbedBuilder()
         .setColor(m.color).setTitle(m.emoji + "  A MIRACULOUS HAS BEEN PASSED ON").setDescription("⋆ ━━━━━━━━━━━━━━━━━━━━━━ ⋆")
@@ -1687,6 +2058,7 @@ client.on('interactionCreate', async interaction => {
     }
     const target = interaction.options.getUser('target');
     villainAbilityUsed[interaction.user.id] = true;
+    saveData('./villainAbilityUsed.json', villainAbilityUsed);
     if (villain.id === 'lady_chaos') {
       const member = await interaction.guild.members.fetch(target.id).catch(() => null);
       await interaction.reply({ content: `⚡ **Lady Chaos strikes!** <@${target.id}> has been timed out for ${formatTime(villain.timeoutSeconds * 1000)}!` });
@@ -1697,6 +2069,7 @@ client.on('interactionCreate', async interaction => {
       if (member) try { await member.timeout(villain.timeoutSeconds * 1000, "Stormy Weather used by " + interaction.user.username); } catch (e) {}
     } else if (villain.id === 'timebreaker') {
       delete powerCooldowns[target.id];
+      saveData('./powerCooldowns.json', powerCooldowns);
       await interaction.reply({ content: `⏱️ **Timebreaker rewound time!** <@${target.id}>'s Miraculous cooldown has been wiped!` });
     }
     return;
@@ -1720,6 +2093,7 @@ client.on('interactionCreate', async interaction => {
       delete activeAkuma[activeMonarchId];
       delete villainAbilityUsed[interaction.user.id];
     }
+    saveAll();
     await interaction.reply({ content: `🦋 **${interaction.user.username}** has broken free! The akuma shatters and dissolves into the air.` });
     return;
   }
@@ -1760,6 +2134,7 @@ client.on('interactionCreate', async interaction => {
 
           claimedMiraculous[am.id] = { userId: interaction.user.id, username: interaction.user.username };
           userMiraculous[interaction.user.id] = am.id;
+          saveAll();
 
           const goodBtn = new ButtonBuilder()
             .setCustomId(`align__${interaction.user.id}__good`)
@@ -1819,6 +2194,7 @@ client.on('interactionCreate', async interaction => {
     }
     claimedMiraculous[miraculous.id] = { userId: interaction.user.id, username: interaction.user.username };
     userMiraculous[interaction.user.id] = miraculous.id;
+    saveAll();
     const disabled = new ButtonBuilder().setCustomId('reveal_miraculous').setLabel('...').setStyle(ButtonStyle.Secondary).setDisabled(true);
     await interaction.update({ components: [new ActionRowBuilder().addComponents(disabled)] });
 
@@ -1904,7 +2280,8 @@ client.on('interactionCreate', async interaction => {
       return;
     }
     const m = findMiraculous(mid);
-    delete claimedMiraculous[mid];
+    const midKey = Array.isArray(mid) ? mid[0] : mid;
+    delete claimedMiraculous[midKey];
     delete userMiraculous[interaction.user.id];
     delete powerCooldowns[interaction.user.id];
     delete mothMode[interaction.user.id];
@@ -1913,6 +2290,7 @@ client.on('interactionCreate', async interaction => {
     delete villainAbilityUsed[interaction.user.id];
     delete userAlignment[interaction.user.id];
     delete akumatizationPending[interaction.user.id];
+    saveAll();
     await interaction.reply({
       content: `🕊️ **You have renounced the ${m?.animal || 'Unknown'} Miraculous.** The Kwami quietly returns to the Guardian's box...`,
       ephemeral: true
@@ -1951,7 +2329,8 @@ client.on('interactionCreate', async interaction => {
       return;
     }
     const m = findMiraculous(mid);
-    delete claimedMiraculous[mid];
+    const midKey = Array.isArray(mid) ? mid[0] : mid;
+    delete claimedMiraculous[midKey];
     delete userMiraculous[interaction.user.id];
     delete powerCooldowns[interaction.user.id];
     delete mothMode[interaction.user.id];
@@ -1960,6 +2339,7 @@ client.on('interactionCreate', async interaction => {
     delete villainAbilityUsed[interaction.user.id];
     delete userAlignment[interaction.user.id];
     delete akumatizationPending[interaction.user.id];
+    saveAll();
     await interaction.reply({
       content: `🦅 **You have returned the ${m?.animal || 'Unknown'} Miraculous to the Monk.** *The spirit gently retreats back into the ancient box...*`,
       ephemeral: true
@@ -1993,6 +2373,7 @@ client.on('interactionCreate', async interaction => {
         ephemeral: true
       });
     }
+    saveData('./userAlignment.json', userAlignment);
     return;
   }
 
@@ -2012,6 +2393,7 @@ client.on('interactionCreate', async interaction => {
     userCharms[interaction.user.id] -= 1500;
     if (!guardianUpgrades[interaction.user.id]) guardianUpgrades[interaction.user.id] = {};
     guardianUpgrades[interaction.user.id].unification = true;
+    saveAll();
     await interaction.reply({
       content: `✨ UNIFICATION UNLOCKED!\n\nYou may now use \`/unify\`.\n\nRemaining Charms: ${getCharms(interaction.user.id)} 🪙`
     });
@@ -2028,6 +2410,7 @@ client.on('interactionCreate', async interaction => {
       return;
     }
     mothMode[interaction.user.id] = mode;
+    saveData('./mothMode.json', mothMode);
     const label = mode === 'betterfly' ? '🦋 Betterfly' : '🦋 Chrysalis';
     await interaction.update({ content: `You have chosen **${label}**! Use \`/usepower @target\` whenever you're ready.`, components: [] });
     return;
@@ -2045,6 +2428,7 @@ client.on('interactionCreate', async interaction => {
     const villain = villains.find(v => v.id === villainId);
     if (!villain) { await interaction.reply({ content: "Unknown villain.", ephemeral: true }); return; }
     akumatizationPending[targetId] = { monarchId, villain: villainId, mode: 'chrysalis' };
+    saveData('./akumatizationPending.json', akumatizationPending);
     await interaction.update({ content: `Villain **${villain.name}** selected! Sending akuma now...`, components: [] });
     const channel = interaction.channel;
     let targetUser;
@@ -2077,6 +2461,7 @@ client.on('interactionCreate', async interaction => {
     const villain = villains.find(v => v.id === villainId);
     activeAkuma[monarchId] = { targetId, targetUsername: interaction.user.username, villain: villainId };
     delete akumatizationPending[targetId];
+    saveAll();
     await interaction.update({ components: [] });
     await interaction.followUp({
       content:
@@ -2097,6 +2482,7 @@ client.on('interactionCreate', async interaction => {
       return;
     }
     delete akumatizationPending[targetId];
+    saveData('./akumatizationPending.json', akumatizationPending);
     await interaction.update({ components: [] });
     await interaction.followUp({ content: `🦋 **${interaction.user.username}** has refused the akuma. The butterfly crumbles to dust...` });
     return;
@@ -2113,6 +2499,7 @@ client.on('interactionCreate', async interaction => {
     }
     activeAkuma[monarchId] = { targetId, targetUsername: interaction.user.username, villain: 'kamiko' };
     delete akumatizationPending[targetId];
+    saveAll();
     await interaction.update({ components: [] });
     await interaction.followUp({ content: `✨ **${interaction.user.username}** has accepted Betterfly's gift and transformed into **Kamiko**!\n*A new hero rises for the greater good.*` });
     return;
@@ -2128,6 +2515,7 @@ client.on('interactionCreate', async interaction => {
       return;
     }
     delete akumatizationPending[targetId];
+    saveData('./akumatizationPending.json', akumatizationPending);
     await interaction.update({ components: [] });
     await interaction.followUp({ content: `🦋 **${interaction.user.username}** has declined Betterfly's gift. The light fades gently away...` });
     return;
@@ -2145,11 +2533,9 @@ client.on('interactionCreate', async interaction => {
     const action = interaction.customId.replace('panel__', '');
 
     if (action === 'reset_all') {
-      // Wipe everyone EXCEPT the owner
       const uids = Object.keys(userMiraculous).filter(uid => uid !== OWNER_ID);
       const count = uids.length;
       for (const uid of uids) { wipeMiraculous(uid); }
-      // Also clean up claimedMiraculous entries that don't belong to the owner
       for (const mid of Object.keys(claimedMiraculous)) {
         if (claimedMiraculous[mid]?.userId !== OWNER_ID) {
           delete claimedMiraculous[mid];
@@ -2180,7 +2566,6 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (action === 'wipe_economy') {
-      // Wipe economy for everyone EXCEPT the owner
       let count = 0;
       for (const uid of Object.keys(userCharms)) {
         if (uid !== OWNER_ID) {
@@ -2219,12 +2604,21 @@ client.on('interactionCreate', async interaction => {
 
 });
 
-// ─── Save ALL data every 5 seconds ────────────────────────────────────────────
+// ── Helper: save battle state + HP together ───────────────────────────────────
+function saveBattleAndHP(battle, battleId) {
+  activeBattles[battleId] = battle;
+  userHP[battle.attackerId] = battle.attackerHP;
+  userHP[battle.defenderId] = battle.defenderHP;
+  saveData('./activeBattles.json', activeBattles);
+  saveData('./userHP.json', userHP);
+}
+
+// ─── Save ALL data every 10 seconds as a backup ───────────────────────────────
 setInterval(() => {
   saveAll();
-}, 5000);
+}, 10000);
 
-// ─── Also save on clean shutdown ──────────────────────────────────────────────
+// ─── Save on clean shutdown ───────────────────────────────────────────────────
 process.on('SIGINT', () => {
   console.log('💾 Saving all data before shutdown...');
   saveAll();
@@ -2236,6 +2630,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+// ─── Message listener ─────────────────────────────────────────────────────────
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   const content = message.content.toLowerCase();
@@ -2271,52 +2666,40 @@ client.on('messageCreate', async (message) => {
   }
 });
 
+// ─── GIMMI buttons (second interactionCreate listener) ────────────────────────
 client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isButton()) return;
 
-  // ════════════════════════════════════════════════════════════════════════════
-  //   GIMMI: WEALTH
-  // ════════════════════════════════════════════════════════════════════════════
-  if (interaction.isButton() && interaction.customId === 'gimmi_wealth') {
+  if (interaction.customId === 'gimmi_wealth') {
     addCharms(interaction.user.id, 1000000);
     await interaction.reply({ content: `💰 Gimmi has granted infinite wealth.\n\n+1,000,000 Charms 🪙`, ephemeral: true });
     return;
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  //   GIMMI: POWER
-  // ════════════════════════════════════════════════════════════════════════════
-  if (interaction.isButton() && interaction.customId === 'gimmi_power') {
+  if (interaction.customId === 'gimmi_power') {
     claimedMiraculous['prodigious'] = { userId: interaction.user.id, username: interaction.user.username };
     userMiraculous[interaction.user.id] = 'prodigious';
-    saveData('./userMiraculous.json', userMiraculous);
-    saveData('./claimedMiraculous.json', claimedMiraculous);
+    saveAll();
     await interaction.reply({ content: `⚡ Gimmi has granted absolute power.\n\n🐉 You now possess the Prodigious.`, ephemeral: true });
     return;
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  //   GIMMI: GRAND RESET
-  // ════════════════════════════════════════════════════════════════════════════
-  if (interaction.isButton() && interaction.customId === 'gimmi_reset') {
-    // Preserve the owner's miraculous during grand reset
-    const ownerMc = claimedMiraculous ? Object.fromEntries(
+  if (interaction.customId === 'gimmi_reset') {
+    const ownerMc = Object.fromEntries(
       Object.entries(claimedMiraculous).filter(([, v]) => v?.userId === OWNER_ID)
-    ) : {};
+    );
     const ownerUm = userMiraculous[OWNER_ID];
 
     for (const key in claimedMiraculous) { delete claimedMiraculous[key]; }
     for (const key in userMiraculous) { delete userMiraculous[key]; }
 
-    // Restore owner's data
     Object.assign(claimedMiraculous, ownerMc);
     if (ownerUm) userMiraculous[OWNER_ID] = ownerUm;
 
-    saveData('./userMiraculous.json', userMiraculous);
-    saveData('./claimedMiraculous.json', claimedMiraculous);
+    saveAll();
     await interaction.reply({ content: `🌌 Gimmi has rewritten reality.\n\nAll Miraculouses across existence have been reset. *(Yours were preserved.)*`, ephemeral: true });
     return;
   }
-
 });
 
 client.login(TOKEN);
