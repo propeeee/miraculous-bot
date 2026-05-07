@@ -2144,11 +2144,11 @@ saveAll();
 
           const goodBtn = new ButtonBuilder()
             .setCustomId(`align__${interaction.user.id}__good`)
-            .setLabel('✨ Use it for the Greater Good (+100 Charms)')
+            .setLabel('Accept the miraculous')
             .setStyle(ButtonStyle.Success);
           const evilBtn = new ButtonBuilder()
             .setCustomId(`align__${interaction.user.id}__evil`)
-            .setLabel('🦹 Use it for Evil Purposes')
+            .setLabel('Reject the miraculous')
             .setStyle(ButtonStyle.Danger);
 
           const acceptBtn = new ButtonBuilder()
@@ -2206,11 +2206,11 @@ saveAll();
 
     const goodBtn = new ButtonBuilder()
       .setCustomId(`align__${interaction.user.id}__good`)
-      .setLabel('✨ Use it for the Greater Good (+100 Charms)')
+      .setLabel('Accept the miraculous')
       .setStyle(ButtonStyle.Success);
     const evilBtn = new ButtonBuilder()
       .setCustomId(`align__${interaction.user.id}__evil`)
-      .setLabel('🦹 Use it for Evil Purposes')
+      .setLabel('Reject the miraculous')
       .setStyle(ButtonStyle.Danger);
 
     const acceptBtn = new ButtonBuilder()
