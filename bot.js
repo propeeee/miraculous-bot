@@ -1,16 +1,3 @@
-const express = require('express');
-const app = express();
-
-app.get('/', (req, res) => {
-    res.send('Bot is online!');
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-    console.log(`Web server running on port ${PORT}`);
-});
-
 const fs = require('fs');
 
 function loadData(file, fallback = {}) {
@@ -50,10 +37,27 @@ const activeAkuma = {};
 const akumatizationPending = {};
 const villainAbilityUsed = {};
 const guardianUpgrades = {}; // userId -> upgrades/unlocks
+
+// ─── HP System ────────────────────────────────────────────────────────────────
+const userHP = {}; // userId -> current HP (max 100)
+function getHP(userId) {
+  if (userHP[userId] === undefined) userHP[userId] = 100;
+  return userHP[userId];
+}
+function applyDamage(userId, amount) {
+  if (userHP[userId] === undefined) userHP[userId] = 100;
+  userHP[userId] = Math.max(0, userHP[userId] - amount);
+  return userHP[userId];
+}
+function resetHP(userId) {
+  userHP[userId] = 100;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DETRANSFORM_MS  = 5 * 60 * 1000;
 const RECHARGE_MS     = 4 * 60 * 1000;
 const PATROL_COOLDOWN = 5 * 60 * 1000;
+
 function getCharms(userId) {
   return userCharms[userId] || 0;
 }
@@ -153,12 +157,12 @@ const miraculousList = [
     killChance: 0
   },
   {
-    id: "destruction", weight: 6, color: 0x2C2C54, emoji: MIRACULOUS_EMOJIS.cat,
+    id: "destruction", weight: 4, color: 0x2C2C54, emoji: MIRACULOUS_EMOJIS.cat,
     holder: "Cat Noir", kwami: "Plagg", animal: "Black Cat", type: "Ring",
     power: "CATACLYSM", ability: "Destruction",
     powerDesc: "Destroys anything it touches with a single touch. No material can withstand its devastating power.",
     cooldown: "5 minutes before detransform", warning: "destruction is irreversible — use wisely",
-    targetEffect: "damage", killChance: 50, missChance: 20,
+    targetEffect: "damage", damageMin: 40, damageMax: 70, killChance: 50, missChance: 20,
     targetFlavor: "Plagg surges through your fingertips. Dark energy engulfs {target} — Cataclysm tears through them with unstoppable force.",
     killFlavor: "The Cataclysm consumes {target} entirely. There is nothing left.",
     missFlavor: "Plagg's energy crackles and dissipates — the Cataclysm missed {target} entirely. *\"Told you I needed more Camembert,\"* Plagg mutters."
@@ -169,7 +173,7 @@ const miraculousList = [
     power: "SHELL-TER", ability: "Protection",
     powerDesc: "Creates an impenetrable dome shield that protects everyone inside from any attack or outside force.",
     cooldown: "5 minutes before detransform", warning: "you cannot protect others if you fall",
-    targetEffect: "flavor", killChance: 0, missChance: 15,
+    targetEffect: "heal", healAmount: 30, killChance: 0, missChance: 15,
     targetFlavor: "Wayzz pulses steady and strong. A shimmering teal dome snaps into place around {target}. Nothing reaches them now.",
     missFlavor: "The Shell-ter flickered — the dome dissipated before it could form around {target}."
   },
@@ -230,7 +234,7 @@ const miraculousList = [
     power: "RESISTANCE", ability: "Determination",
     powerDesc: "Charges forward with unstoppable force, shattering any obstacle or barrier in a straight line.",
     cooldown: "5 minutes before detransform", warning: "momentum is hard to stop — aim carefully",
-    targetEffect: "flavor", killChance: 30, missChance: 10,
+    targetEffect: "damage", damageMin: 20, damageMax: 45, killChance: 30, missChance: 10,
     targetFlavor: "Stompp charges through your legs. You lower your head and surge toward {target} — nothing between you survives the impact.",
     killFlavor: "The Resistance charge was absolute — {target} had no way to withstand that force.",
     missFlavor: "You charged straight past {target} — Stompp sighs. *\"Aim first, charge second.\"*"
@@ -241,7 +245,7 @@ const miraculousList = [
     power: "COLLISION", ability: "Elation",
     powerDesc: "Delivers a devastating strike that collides two forces together, creating a shockwave of pure energy.",
     cooldown: "5 minutes before detransform", warning: "elation without focus becomes destruction",
-    targetEffect: "flavor", killChance: 40, missChance: 15,
+    targetEffect: "damage", damageMin: 30, damageMax: 60, killChance: 40, missChance: 15,
     targetFlavor: "Roaar roars inside you. You launch toward {target} — two forces collide in a burst of orange light. The shockwave ripples outward.",
     killFlavor: "Collision — the shockwave tore through {target} with the force of a thousand suns.",
     missFlavor: "The Collision missed — {target} dodged the shockwave. Roaar growls in frustration."
@@ -262,7 +266,7 @@ const miraculousList = [
     power: "WATER / LIGHTNING / WIND", ability: "Weather Manipulation",
     powerDesc: "Commands three elemental forces — water, lightning, and wind — each devastating in its own way.",
     cooldown: "5 minutes before detransform", warning: "the storm does not choose its victims",
-    targetEffect: "flavor", killChance: 35, missChance: 20,
+    targetEffect: "damage", damageMin: 25, damageMax: 55, killChance: 35, missChance: 20,
     targetFlavor: "Longg coils around you, scales shimmering. The sky answers your call — lightning crackles, wind howls, rain lashes down around {target}.",
     killFlavor: "The storm converged on {target} with full elemental fury. Lightning does not miss twice.",
     missFlavor: "The storm swirled but dissipated — {target} slipped out of its reach."
@@ -303,7 +307,7 @@ const miraculousList = [
     power: "UPROAR", ability: "Mayhem / Disruption",
     powerDesc: "Summons a magical object that causes unpredictable chaos, disrupting any power, plan, or ability it touches.",
     cooldown: "5 minutes before detransform", warning: "chaos is a tool — not a toy",
-    targetEffect: "flavor", killChance: 20, missChance: 30,
+    targetEffect: "damage", damageMin: 10, damageMax: 35, killChance: 20, missChance: 30,
     targetFlavor: "Xuppu cackles. A wild object appears and slams into {target}'s situation — whatever they were doing, planning, or using just got completely derailed. Pure chaos.",
     killFlavor: "The Uproar spiraled wildly out of control — and somehow {target} was caught in the absolute centre of the chaos.",
     missFlavor: "The chaos object flew completely the wrong direction. Xuppu shrugs. *\"That was funnier anyway.\"*"
@@ -340,6 +344,134 @@ const miraculousList = [
   }
 ];
 
+// ─── American Miracle Box ─────────────────────────────────────────────────────
+// Weight 4 = same rarity as creation/destruction
+const americanMiraculousList = [
+  {
+    id: "am_eagle", weight: 8, color: 0x4169E1, emoji: "🦅",
+    holder: "Eagle", kwami: "Liiri", animal: "Eagle", type: "Talon Necklace",
+    power: "LIBERATION", ability: "Liberation",
+    powerDesc: "Frees others from mental or physical restrictions. Unlocks the true potential locked within any person or object.",
+    cooldown: "5 minutes before detransform", warning: "not all chains were meant to be broken",
+    targetEffect: "flavor", killChance: 0, missChance: 15,
+    targetFlavor: "Liiri cries out, wings wide. A blazing light envelops {target} — every restriction, every limitation, every chain shatters. They are free.",
+    missFlavor: "The Liberation pulse scattered — {target} was beyond its reach."
+  },
+  {
+    id: "am_thunderbird", weight: 3, color: 0x8B0000, emoji: "⚡",
+    holder: "Thunderbird", kwami: "Rimma", animal: "Thunderbird", type: "Hair Tie",
+    power: "STORM CALL", ability: "Storm Dominion",
+    powerDesc: "The most powerful of the American box — commands lightning, thunder, and storm with absolute authority. Said to be the heart of the box itself.",
+    cooldown: "5 minutes before detransform", warning: "the sky itself fears the Thunderbird",
+    targetEffect: "damage", damageMin: 50, damageMax: 90, killChance: 55, missChance: 10,
+    targetFlavor: "Rimma screams with ancient fury. The sky splits — a pillar of lightning crashes down upon {target} with the wrath of a thousand storms.",
+    killFlavor: "The Thunderbird's storm was absolute. {target} was consumed by lightning before they could even react.",
+    missFlavor: "The lightning bolt veered — {target} barely escaped the edge of the storm. Rimma screeches in frustration."
+  },
+  {
+    id: "am_wolf", weight: 6, color: 0x708090, emoji: "🐺",
+    holder: "Wolf", kwami: "Fenrix", animal: "Wolf", type: "Feather Charm Necklace",
+    power: "PATHFIND", ability: "Loyalty / Pathfinding",
+    powerDesc: "Reveals the hidden path to any destination, person, or truth. Can track anything across any distance.",
+    cooldown: "5 minutes before detransform", warning: "the wolf always finds what it hunts",
+    targetEffect: "flavor", killChance: 0, missChance: 20,
+    targetFlavor: "Fenrix howls low. The ground beneath you glows — every trail, every hidden route, every secret path lights up. You know exactly where {target} is. You always will.",
+    missFlavor: "The trail went cold — {target} covered their tracks well. Fenrix growls quietly."
+  },
+  {
+    id: "am_bear", weight: 6, color: 0x8B4513, emoji: "🐻",
+    holder: "Bear", kwami: "Otera", animal: "Bear", type: "Brooch",
+    power: "REGENERATE", ability: "Regeneration / Power",
+    powerDesc: "Channels raw power and regenerative force, able to heal grievous wounds and unleash devastating strength.",
+    cooldown: "5 minutes before detransform", warning: "power without control is destruction",
+    targetEffect: "heal", healAmount: 50, killChance: 0, missChance: 10,
+    targetFlavor: "Otera rumbles with ancient strength. A wave of primal energy washes over {target} — wounds close, strength surges, vitality returns.",
+    missFlavor: "The regeneration pulse failed to reach {target} in time."
+  },
+  {
+    id: "am_buffalo", weight: 6, color: 0x4B3621, emoji: "🦬",
+    holder: "Buffalo", kwami: "Tanka", animal: "Buffalo", type: "Thumb Ring",
+    power: "RETRIBUTION", ability: "Dedication / Retribution",
+    powerDesc: "Returns damage dealt to its rightful source — what was done to others echoes back twofold.",
+    cooldown: "5 minutes before detransform", warning: "retribution does not forget",
+    targetEffect: "damage", damageMin: 30, damageMax: 65, killChance: 35, missChance: 15,
+    targetFlavor: "Tanka stamps the earth. The ground trembles. Every strike {target} has ever dealt is returned to them now — doubled. The debt is paid.",
+    killFlavor: "Retribution was absolute. The Buffalo's power found {target} and delivered justice in full.",
+    missFlavor: "The retribution pulse found no purchase — {target} had no debt to collect."
+  },
+  {
+    id: "am_falcon", weight: 7, color: 0xDAA520, emoji: "🦆",
+    holder: "Falcon", kwami: "Eyris", animal: "Falcon", type: "Eye Pendant",
+    power: "FARSIGHT", ability: "Vision / Insight",
+    powerDesc: "Grants perfect vision across any distance, seeing through illusions, barriers, and deception.",
+    cooldown: "5 minutes before detransform", warning: "not all truths bring comfort",
+    targetEffect: "flavor", killChance: 0, missChance: 10,
+    targetFlavor: "Eyris focuses with razor precision. Your gaze pierces through everything — every illusion, every lie, every shield around {target} becomes transparent. You see it all.",
+    missFlavor: "The vision blurred — {target} was cloaked beyond even Falcon's sight."
+  },
+  {
+    id: "am_otter", weight: 7, color: 0x87CEEB, emoji: "🦦",
+    holder: "Otter", kwami: "Flowa", animal: "Otter", type: "River Stone Pendant",
+    power: "TRUTH STREAM", ability: "Friendship / Truth",
+    powerDesc: "Reveals the absolute truth in any situation, stripping away all deception and revealing hidden bonds.",
+    cooldown: "5 minutes before detransform", warning: "truth is a weapon and a gift",
+    targetEffect: "flavor", killChance: 0, missChance: 15,
+    targetFlavor: "Flowa splashes with energy. A crystal stream of light flows around {target} — every hidden truth surfaces. Everything they've concealed becomes known.",
+    missFlavor: "The truth stream dispersed — {target}'s secrets remain hidden for now."
+  },
+  {
+    id: "am_deer", weight: 7, color: 0x90EE90, emoji: "🦌",
+    holder: "Deer", kwami: "Grazia", animal: "Deer", type: "Antler Charm",
+    power: "GRACE", ability: "Evasion / Entertainment",
+    powerDesc: "Moves with impossible grace, evading any attack and charming all who witness the display.",
+    cooldown: "5 minutes before detransform", warning: "grace has limits even grace cannot predict",
+    targetEffect: "flavor", killChance: 0, missChance: 5,
+    targetFlavor: "Grazia leaps. You move like flowing water — {target} cannot track you. Every strike finds only air, every trap finds only your shadow.",
+    missFlavor: "Even Grazia stumbled — the footing was too uneven to land near {target}."
+  },
+  {
+    id: "am_raven", weight: 6, color: 0x1C1C1C, emoji: "🐦‍⬛",
+    holder: "Raven", kwami: "Morryx", animal: "Raven", type: "Feather Ring",
+    power: "SHADOW WEAVE", ability: "Manipulation",
+    powerDesc: "Weaves shadows and illusions that manipulate perception, turning enemies against each other.",
+    cooldown: "5 minutes before detransform", warning: "the raven never lies — it simply omits",
+    targetEffect: "flavor", killChance: 0, missChance: 20,
+    targetFlavor: "Morryx caws once. Shadows curl around {target} like smoke — their perception shifts. What is real and what is shadow? They can no longer tell.",
+    missFlavor: "The shadows refused to cooperate — {target} remained unaffected."
+  },
+  {
+    id: "am_owl", weight: 6, color: 0xD2B48C, emoji: "🦉",
+    holder: "Owl", kwami: "Sagis", animal: "Owl", type: "Feather Brooch",
+    power: "OMNISIGHT", ability: "Truth / Omniscience",
+    powerDesc: "Grants total awareness of all things in the surrounding area — no secret, no whisper, no movement goes undetected.",
+    cooldown: "5 minutes before detransform", warning: "knowing everything is its own burden",
+    targetEffect: "flavor", killChance: 0, missChance: 5,
+    targetFlavor: "Sagis opens wide, unblinking eyes. The world becomes transparent — you know where {target} is, what they intend, and what they fear. Total awareness.",
+    missFlavor: "Even Sagis was blinded — something blocked the Omnisight."
+  },
+  {
+    id: "am_salmon", weight: 7, color: 0xFF6347, emoji: "🐟",
+    holder: "Salmon", kwami: "Runnix", animal: "Salmon", type: "Scale Charm",
+    power: "RESTORATION", ability: "Knowledge / Restoration",
+    powerDesc: "Restores people, objects, and situations to their ideal state using accumulated ancient wisdom.",
+    cooldown: "5 minutes before detransform", warning: "restoration cannot undo what was never whole",
+    targetEffect: "heal", healAmount: 40, killChance: 0, missChance: 10,
+    targetFlavor: "Runnix leaps upstream. Ancient knowledge flows through your hands — everything around {target} is restored. What was broken is whole. What was lost returns.",
+    missFlavor: "The restoration current missed — {target} could not be reached in time."
+  },
+  {
+    id: "am_raccoon", weight: 8, color: 0x696969, emoji: "🦝",
+    holder: "Raccoon", kwami: "Scrappy", animal: "Raccoon", type: "Mask Charm",
+    power: "SCAVENGE", ability: "Resourcefulness",
+    powerDesc: "Finds and repurposes anything in the environment as a weapon or tool — no resource goes to waste.",
+    cooldown: "5 minutes before detransform", warning: "one person's trash is another's weapon",
+    targetEffect: "damage", damageMin: 15, damageMax: 40, killChance: 20, missChance: 25,
+    targetFlavor: "Scrappy grins. From nothing, you build everything — improvised tools, makeshift weapons, environmental traps all converge on {target} at once.",
+    killFlavor: "Scrappy's resourcefulness was catastrophic — {target} didn't account for the environment being turned against them.",
+    missFlavor: "Scrappy couldn't find anything useful nearby — the scavenge came up empty."
+  }
+];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getRandomMiraculous() {
   const available = miraculousList.filter(m => !claimedMiraculous[m.id]);
@@ -353,14 +485,30 @@ function getRandomMiraculous() {
   return available[available.length - 1];
 }
 
+function getRandomAmericanMiraculous() {
+  const available = americanMiraculousList.filter(m => !claimedMiraculous[m.id]);
+  if (available.length === 0) return null;
+  const total = available.reduce((sum, m) => sum + m.weight, 0);
+  let rand = Math.random() * total;
+  for (const m of available) {
+    rand -= m.weight;
+    if (rand <= 0) return m;
+  }
+  return available[available.length - 1];
+}
+
+// Combined miraculous lookup (both lists)
+function findMiraculous(id) {
+  return miraculousList.find(x => x.id === id) || americanMiraculousList.find(x => x.id === id);
+}
+
 // Build the beautiful new miraculous embed matching the reference style
 function buildMiraculousEmbed(miraculous, user) {
-  const emojiLine = `${miraculous?.emoji || '❓'}  **${(miraculous?.animal || 'Unknown').toUpperCase()} MIRACULOUS**`;
   return new EmbedBuilder()
-.setColor(miraculous?.color || 0x7B2FBE)
+    .setColor(miraculous?.color || 0x7B2FBE)
     .setTitle(`﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`)
     .setDescription(
-      `${miraculous?.emoji || '❓'}  **$${(miraculous?.animal || 'Unknown').toUpperCase()} MIRACULOUS**\n` +
+      `${miraculous?.emoji || '❓'}  **${(miraculous?.animal || 'Unknown').toUpperCase()} MIRACULOUS**\n` +
       `──────────── ˗ˋ ୨୧ ˊ˗ ────────────\n` +
       `➜ **𝖧𝗈𝗅𝖽𝖾𝗋**\n<@${user.id}>\n` +
       `➜ **𝖪𝗐𝖺𝗆𝗂**\n**${miraculous.kwami}**\n` +
@@ -469,100 +617,100 @@ client.once('ready', async () => {
       .setDescription('Go on patrol to earn Charms! (5 minute cooldown)'),
 
     new SlashCommandBuilder()
-  .setName('leaderboard')
-  .setDescription('See the top Charms holders'),
+      .setName('leaderboard')
+      .setDescription('See the top Charms holders'),
 
-new SlashCommandBuilder()
-  .setName('renounce')
-  .setDescription('Renounce your current Miraculous and return it to the Guardian'),
+    new SlashCommandBuilder()
+      .setName('guardianshop')
+      .setDescription('Browse Guardian upgrades'),
 
-new SlashCommandBuilder()
-  .setName('guardianshop')
-  .setDescription('Browse Guardian upgrades'),
+    new SlashCommandBuilder()
+      .setName('reveal')
+      .setDescription('Summon Gimmi using Creation and Destruction'),
 
-new SlashCommandBuilder()
-  .setName('reveal')
-  .setDescription('Summon Gimmi using Creation and Destruction'),
+    new SlashCommandBuilder()
+      .setName('unify')
+      .setDescription('Use Unification to hold 2 Miraculouses'),
 
-new SlashCommandBuilder()
-  .setName('unify')
-  .setDescription('Use Unification to hold 2 Miraculouses'),
+    new SlashCommandBuilder()
+      .setName('hp')
+      .setDescription('Check your current HP'),
 
-new SlashCommandBuilder()
-  .setName('charms')
-  .setDescription('Add Charms to a user')
-  .addUserOption(o =>
-    o.setName('user')
-      .setDescription('User to give Charms to')
-      .setRequired(true))
-  .addIntegerOption(o =>
-    o.setName('amount')
-      .setDescription('Amount of Charms')
-      .setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('charms')
+      .setDescription('Add Charms to a user')
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('User to give Charms to')
+          .setRequired(true))
+      .addIntegerOption(o =>
+        o.setName('amount')
+          .setDescription('Amount of Charms')
+          .setRequired(true)),
 
-new SlashCommandBuilder()
-  .setName('givemiraculous')
-  .setDescription('Give a specific Miraculous to a user')
-  .addUserOption(o =>
-    o.setName('user')
-      .setDescription('Target user')
-      .setRequired(true))
-  .addStringOption(o =>
-    o.setName('miraculous')
-      .setDescription('Miraculous to give')
-      .setRequired(true)
-      .addChoices(
-  { name: 'Creation', value: 'creation' },
-  { name: 'Destruction', value: 'destruction' },
-  { name: 'Illusion', value: 'illusion' },
-  { name: 'Subjection', value: 'subjection' },
-  { name: 'Protection', value: 'protection' },
-  { name: 'Transmission', value: 'transmission' },
-  { name: 'Emotion', value: 'emotion' },
-  { name: 'Multiplication', value: 'multiplication' },
-  { name: 'Teleportation', value: 'teleportation' },
-  { name: 'Intuition', value: 'intuition' },
-  { name: 'Evolution', value: 'evolution' },
-  { name: 'Pretension', value: 'pretension' },
-  { name: 'Jubilation', value: 'jubilation' },
-  { name: 'Determination', value: 'determination' },
-  { name: 'Passion', value: 'passion' },
-  { name: 'Prodigious', value: 'prodigious' }
-)),
+    new SlashCommandBuilder()
+      .setName('givemiraculous')
+      .setDescription('Give a specific Miraculous to a user')
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('Target user')
+          .setRequired(true))
+      .addStringOption(o =>
+        o.setName('miraculous')
+          .setDescription('Miraculous to give')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Creation', value: 'creation' },
+            { name: 'Destruction', value: 'destruction' },
+            { name: 'Illusion', value: 'illusion' },
+            { name: 'Subjection', value: 'subjection' },
+            { name: 'Protection', value: 'protection' },
+            { name: 'Transmission', value: 'transmission' },
+            { name: 'Emotion', value: 'emotion' },
+            { name: 'Multiplication', value: 'multiplication' },
+            { name: 'Teleportation', value: 'teleportation' },
+            { name: 'Intuition', value: 'intuition' },
+            { name: 'Evolution', value: 'evolution' },
+            { name: 'Pretension', value: 'pretension' },
+            { name: 'Jubilation', value: 'jubilation' },
+            { name: 'Determination', value: 'determination' },
+            { name: 'Passion', value: 'passion' },
+            { name: 'Prodigious', value: 'prodigious' }
+          )),
 
-new SlashCommandBuilder()
-  .setName('check')
-  .setDescription('Check who owns a Miraculous')
-  .addStringOption(o =>
-    o.setName('miraculous')
-      .setDescription('Miraculous to check')
-      .setRequired(true)
-      .addChoices(
-  { name: 'Creation', value: 'creation' },
-  { name: 'Destruction', value: 'destruction' },
-  { name: 'Illusion', value: 'illusion' },
-  { name: 'Subjection', value: 'subjection' },
-  { name: 'Protection', value: 'protection' },
-  { name: 'Transmission', value: 'transmission' },
-  { name: 'Emotion', value: 'emotion' },
-  { name: 'Multiplication', value: 'multiplication' },
-  { name: 'Teleportation', value: 'teleportation' },
-  { name: 'Intuition', value: 'intuition' },
-  { name: 'Evolution', value: 'evolution' },
-  { name: 'Pretension', value: 'pretension' },
-  { name: 'Jubilation', value: 'jubilation' },
-  { name: 'Determination', value: 'determination' },
-  { name: 'Passion', value: 'passion' },
-  { name: 'Prodigious', value: 'prodigious' }
-)),
+    new SlashCommandBuilder()
+      .setName('check')
+      .setDescription('Check who owns a Miraculous')
+      .addStringOption(o =>
+        o.setName('miraculous')
+          .setDescription('Miraculous to check')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Creation', value: 'creation' },
+            { name: 'Destruction', value: 'destruction' },
+            { name: 'Illusion', value: 'illusion' },
+            { name: 'Subjection', value: 'subjection' },
+            { name: 'Protection', value: 'protection' },
+            { name: 'Transmission', value: 'transmission' },
+            { name: 'Emotion', value: 'emotion' },
+            { name: 'Multiplication', value: 'multiplication' },
+            { name: 'Teleportation', value: 'teleportation' },
+            { name: 'Intuition', value: 'intuition' },
+            { name: 'Evolution', value: 'evolution' },
+            { name: 'Pretension', value: 'pretension' },
+            { name: 'Jubilation', value: 'jubilation' },
+            { name: 'Determination', value: 'determination' },
+            { name: 'Passion', value: 'passion' },
+            { name: 'Prodigious', value: 'prodigious' }
+          )),
 
-new SlashCommandBuilder()
-  .setName('steal')
-  .setDescription('Attempt to steal a Miraculous')
-  .addUserOption(o =>
-    o.setName('user')
-      .setDescription('Target user')
-      .setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('steal')
+      .setDescription('Attempt to steal a Miraculous')
+      .addUserOption(o =>
+        o.setName('user')
+          .setDescription('Target user')
+          .setRequired(true)),
 
   ].map(c => c.toJSON());
 
@@ -597,11 +745,8 @@ async function isAboveBot(interaction) {
     const guild = interaction.guild;
     const botMember = await guild.members.fetchMe();
     const userMember = await guild.members.fetch(interaction.user.id);
-    // Server owner always passes
     if (guild.ownerId === interaction.user.id) return true;
-    // Admin permission passes
     if (userMember.permissions.has(PermissionFlagsBits.Administrator)) return true;
-    // Compare highest role positions
     const botHighest = botMember.roles.highest.position;
     const userHighest = userMember.roles.highest.position;
     return userHighest > botHighest;
@@ -618,9 +763,9 @@ client.on('interactionCreate', async interaction => {
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'miraculous') {
     if (userMiraculous[interaction.user.id]) {
-      const m = miraculousList.find(x => x.id === userMiraculous[interaction.user.id]);
+      const m = findMiraculous(userMiraculous[interaction.user.id]);
       await interaction.reply({
-        content: "You already carry the " + m.animal + " Miraculous, " + interaction.user.username + ". The Guardian does not grant two.",
+        content: "You already carry the " + (m?.animal || 'Unknown') + " Miraculous, " + interaction.user.username + ". The Guardian does not grant two.",
         ephemeral: true
       });
       return;
@@ -635,56 +780,55 @@ client.on('interactionCreate', async interaction => {
     });
     return;
   }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  //   /hp
+  // ══════════════════════════════════════════════════════════════════════════════
+  if (interaction.isChatInputCommand() && interaction.commandName === 'hp') {
+    const hp = getHP(interaction.user.id);
+    const bar = '█'.repeat(Math.round(hp / 10)) + '░'.repeat(10 - Math.round(hp / 10));
+    const color = hp > 60 ? 0x00FF00 : hp > 30 ? 0xFFAA00 : 0xFF0000;
+    const embed = new EmbedBuilder()
+      .setColor(color)
+      .setTitle('❤️  HP STATUS')
+      .setDescription(
+        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
+        `➜ **Hero:** <@${interaction.user.id}>\n` +
+        `➜ **HP:** **${hp} / 100**\n` +
+        `➜ **[${bar}]**\n\n` +
+        (hp === 0 ? `💀 *You have been defeated. Seek healing.*\n\n` : '') +
+        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
+      )
+      .setTimestamp();
+    await interaction.reply({ embeds: [embed] });
+    return;
+  }
+
   // ══════════════════════════════════════════════════════════════════════════════
   //   /unify
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'unify') {
-
     if (!guardianUpgrades[interaction.user.id]?.unification) {
-      await interaction.reply({
-        content: "❌ You have not unlocked Unification.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "❌ You have not unlocked Unification.", ephemeral: true });
       return;
     }
-
     if (!userMiraculous[interaction.user.id]) {
-      await interaction.reply({
-        content: "❌ You need a Miraculous first.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "❌ You need a Miraculous first.", ephemeral: true });
       return;
     }
-
     if (Array.isArray(userMiraculous[interaction.user.id])) {
-      await interaction.reply({
-        content: "You are already unified.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "You are already unified.", ephemeral: true });
       return;
     }
-
     const second = getRandomMiraculous();
-
     if (!second) {
-      await interaction.reply({
-        content: "No Miraculouses available.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "No Miraculouses available.", ephemeral: true });
       return;
     }
-
     const first = userMiraculous[interaction.user.id];
-
-    claimedMiraculous[second.id] = {
-      userId: interaction.user.id,
-      username: interaction.user.username
-    };
-
+    claimedMiraculous[second.id] = { userId: interaction.user.id, username: interaction.user.username };
     userMiraculous[interaction.user.id] = [first, second.id];
-
-    const firstM = miraculousList.find(x => x.id === first);
-
+    const firstM = findMiraculous(first);
     const embed = new EmbedBuilder()
       .setColor(0x9400D3)
       .setTitle('✨ UNIFICATION ACTIVATED ✨')
@@ -693,97 +837,22 @@ client.on('interactionCreate', async interaction => {
         `➜ Second:\n${second.emoji} ${second.animal}`
       )
       .setTimestamp();
-
-    await interaction.reply({
-      embeds: [embed]
-    });
-
+    await interaction.reply({ embeds: [embed] });
     return;
   }
+
   // ══════════════════════════════════════════════════════════════════════════════
   //   /reveal
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'reveal') {
-
     const owned = userMiraculous[interaction.user.id];
-if (interaction.user.username === 'properties.exe') {
-
-  await interaction.reply({
-    content:
-      '🌌 *The universe trembles...*\n\n' +
-      '❤️ **Tikki:** "I am Tikki, Kwami of Creation. I am what is and will be."\n\n' +
-      '🖤 **Plagg:** "I am Plagg, Kwami of Destruction. I am what destroys and returns all to nothing."'
-  });
-
-     const embed = new EmbedBuilder()
-      .setColor(0xFFFFFF)
-      .setTitle('🌌 GIMMI HAS AWAKENED 🌌')
-      .setDescription(
-        `✨ The fusion of Creation and Destruction has summoned **Gimmi**.\n\n` +
-        `Reality bends before <@${interaction.user.id}>.\n\n` +
-        `*"State your wish..."*`
-      )
-      .setTimestamp();
-
-    const wealthBtn = new ButtonBuilder()
-      .setCustomId('gimmi_wealth')
-      .setLabel('💰 Wealth')
-      .setStyle(ButtonStyle.Success);
-
-    const powerBtn = new ButtonBuilder()
-      .setCustomId('gimmi_power')
-      .setLabel('⚡ Power')
-      .setStyle(ButtonStyle.Primary);
-
-    const resetBtn = new ButtonBuilder()
-      .setCustomId('gimmi_reset')
-      .setLabel('🌌 Grand Reset')
-      .setStyle(ButtonStyle.Danger);
-
-    await interaction.followUp({
-      embeds: [embed],
-      components: [
-        new ActionRowBuilder().addComponents(
-          wealthBtn,
-          powerBtn,
-          resetBtn
-        )
-      ]
-    });
-
-  return;
-}
-    if (!owned || !Array.isArray(owned)) {
+    if (interaction.user.username === 'properties.exe') {
       await interaction.reply({
-        content: '⚠️ You must possess both Creation and Destruction through Unification.',
-        ephemeral: true
+        content:
+          '🌌 *The universe trembles...*\n\n' +
+          '❤️ **Tikki:** "I am Tikki, Kwami of Creation. I am what is and will be."\n\n' +
+          '🖤 **Plagg:** "I am Plagg, Kwami of Destruction. I am what destroys and returns all to nothing."'
       });
-      return;
-    }
-
-    const hasCreation =
-      owned.includes('creation');
-
-    const hasDestruction =
-      owned.includes('destruction');
-
-    if (!hasCreation || !hasDestruction) {
-      await interaction.reply({
-        content: '⚠️ You require both the Miraculous of Creation and Destruction.',
-        ephemeral: true
-      });
-      return;
-    }
-
-    await interaction.reply({
-      content:
-        '🌌 *The universe trembles...*\n\n' +
-        '❤️ **Tikki:** "I am Tikki, Kwami of Creation. I am what is and will be."\n\n' +
-        '🖤 **Plagg:** "I am Plagg, Kwami of Destruction. I am what destroys and returns all to nothing."'
-    });
-
-    setTimeout(async () => {
-
       const embed = new EmbedBuilder()
         .setColor(0xFFFFFF)
         .setTitle('🌌 GIMMI HAS AWAKENED 🌌')
@@ -793,74 +862,59 @@ if (interaction.user.username === 'properties.exe') {
           `*"State your wish..."*`
         )
         .setTimestamp();
-
-       const wealthBtn = new ButtonBuilder()
-      .setCustomId('gimmi_wealth')
-      .setLabel('💰 Wealth')
-      .setStyle(ButtonStyle.Success);
-
-
-    const powerBtn = new ButtonBuilder()
-      .setCustomId('gimmi_power')
-      .setLabel('⚡ Power')
-      .setStyle(ButtonStyle.Primary);
-
-    const resetBtn = new ButtonBuilder()
-      .setCustomId('gimmi_reset')
-      .setLabel('🌌 Grand Reset')
-      .setStyle(ButtonStyle.Danger);
-
-    await interaction.followUp({
-      embeds: [embed],
-      components: [
-        new ActionRowBuilder().addComponents(
-          wealthBtn,
-          powerBtn,
-          resetBtn
-        )
-      ]
+      const wealthBtn = new ButtonBuilder().setCustomId('gimmi_wealth').setLabel('💰 Wealth').setStyle(ButtonStyle.Success);
+      const powerBtn = new ButtonBuilder().setCustomId('gimmi_power').setLabel('⚡ Power').setStyle(ButtonStyle.Primary);
+      const resetBtn = new ButtonBuilder().setCustomId('gimmi_reset').setLabel('🌌 Grand Reset').setStyle(ButtonStyle.Danger);
+      await interaction.followUp({ embeds: [embed], components: [new ActionRowBuilder().addComponents(wealthBtn, powerBtn, resetBtn)] });
+      return;
+    }
+    if (!owned || !Array.isArray(owned)) {
+      await interaction.reply({ content: '⚠️ You must possess both Creation and Destruction through Unification.', ephemeral: true });
+      return;
+    }
+    const hasCreation = owned.includes('creation');
+    const hasDestruction = owned.includes('destruction');
+    if (!hasCreation || !hasDestruction) {
+      await interaction.reply({ content: '⚠️ You require both the Miraculous of Creation and Destruction.', ephemeral: true });
+      return;
+    }
+    await interaction.reply({
+      content:
+        '🌌 *The universe trembles...*\n\n' +
+        '❤️ **Tikki:** "I am Tikki, Kwami of Creation. I am what is and will be."\n\n' +
+        '🖤 **Plagg:** "I am Plagg, Kwami of Destruction. I am what destroys and returns all to nothing."'
     });
-
+    setTimeout(async () => {
+      const embed = new EmbedBuilder()
+        .setColor(0xFFFFFF)
+        .setTitle('🌌 GIMMI HAS AWAKENED 🌌')
+        .setDescription(
+          `✨ The fusion of Creation and Destruction has summoned **Gimmi**.\n\n` +
+          `Reality bends before <@${interaction.user.id}>.\n\n` +
+          `*"State your wish..."*`
+        )
+        .setTimestamp();
+      const wealthBtn = new ButtonBuilder().setCustomId('gimmi_wealth').setLabel('💰 Wealth').setStyle(ButtonStyle.Success);
+      const powerBtn = new ButtonBuilder().setCustomId('gimmi_power').setLabel('⚡ Power').setStyle(ButtonStyle.Primary);
+      const resetBtn = new ButtonBuilder().setCustomId('gimmi_reset').setLabel('🌌 Grand Reset').setStyle(ButtonStyle.Danger);
+      await interaction.followUp({ embeds: [embed], components: [new ActionRowBuilder().addComponents(wealthBtn, powerBtn, resetBtn)] });
     }, 4000);
-
     return;
   }
 
-    // ══════════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════════
   //   /panel
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'panel') {
-
     const allowed = await isAboveBot(interaction);
-
     if (!allowed) {
-      await interaction.reply({
-        content: "🚫 You don't have permission to use the Admin Panel.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "🚫 You don't have permission to use the Admin Panel.", ephemeral: true });
       return;
     }
-
-    const resetAllBtn = new ButtonBuilder()
-      .setCustomId('panel__reset_all')
-      .setLabel('🔄 Reset ALL Miraculouses')
-      .setStyle(ButtonStyle.Danger);
-
-    const giveBtn = new ButtonBuilder()
-      .setCustomId('panel__give_prompt')
-      .setLabel('🎁 Give Miraculous')
-      .setStyle(ButtonStyle.Primary);
-
-    const charmsBtn = new ButtonBuilder()
-      .setCustomId('panel__give_charms_prompt')
-      .setLabel('🪙 Give Charms')
-      .setStyle(ButtonStyle.Success);
-
-    const wipeCharmsBtn = new ButtonBuilder()
-      .setCustomId('panel__wipe_economy')
-      .setLabel('💸 Wipe Economy')
-      .setStyle(ButtonStyle.Secondary);
-
+    const resetAllBtn = new ButtonBuilder().setCustomId('panel__reset_all').setLabel('🔄 Reset ALL Miraculouses').setStyle(ButtonStyle.Danger);
+    const giveBtn = new ButtonBuilder().setCustomId('panel__give_prompt').setLabel('🎁 Give Miraculous').setStyle(ButtonStyle.Primary);
+    const charmsBtn = new ButtonBuilder().setCustomId('panel__give_charms_prompt').setLabel('🪙 Give Charms').setStyle(ButtonStyle.Success);
+    const wipeCharmsBtn = new ButtonBuilder().setCustomId('panel__wipe_economy').setLabel('💸 Wipe Economy').setStyle(ButtonStyle.Secondary);
     const panelEmbed = new EmbedBuilder()
       .setColor(0x7B2FBE)
       .setTitle('🛡️  MIRACULOUS ADMIN PANEL')
@@ -874,34 +928,24 @@ if (interaction.user.username === 'properties.exe') {
         '﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉'
       )
       .setTimestamp();
-
     await interaction.reply({
       embeds: [panelEmbed],
-      components: [
-        new ActionRowBuilder().addComponents(
-          resetAllBtn,
-          giveBtn,
-          charmsBtn,
-          wipeCharmsBtn
-        )
-      ],
+      components: [new ActionRowBuilder().addComponents(resetAllBtn, giveBtn, charmsBtn, wipeCharmsBtn)],
       ephemeral: true
     });
-
     return;
   }
+
   // ══════════════════════════════════════════════════════════════════════════════
   //   /balance
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'balance') {
     const charms = getCharms(interaction.user.id);
-
-if (interaction.user.username === 'properties.exe') {
-  addCharms(interaction.user.id, 2000);
-}
+    if (interaction.user.username === 'properties.exe') {
+      addCharms(interaction.user.id, 2000);
+    }
     const mid = userMiraculous[interaction.user.id];
-    const m = mid ? miraculousList.find(x => x.id === mid) : null;
-
+    const m = mid ? findMiraculous(mid) : null;
     const embed = new EmbedBuilder()
       .setColor(0xFFD700)
       .setTitle('🪙  CHARMS BALANCE')
@@ -914,7 +958,6 @@ if (interaction.user.username === 'properties.exe') {
         `\n﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
       )
       .setTimestamp();
-
     await interaction.reply({ embeds: [embed] });
     return;
   }
@@ -928,24 +971,17 @@ if (interaction.user.username === 'properties.exe') {
       await interaction.reply({ content: "⚠️ You need a Miraculous to go on patrol!", ephemeral: true });
       return;
     }
-
     const now = Date.now();
     const lastPatrol = patrolCooldowns[interaction.user.id] || 0;
     const remaining = PATROL_COOLDOWN - (now - lastPatrol);
-
     if (remaining > 0) {
-      await interaction.reply({
-        content: `🦸 You already went on patrol recently! Come back in **${formatTime(remaining)}**.`,
-        ephemeral: true
-      });
+      await interaction.reply({ content: `🦸 You already went on patrol recently! Come back in **${formatTime(remaining)}**.`, ephemeral: true });
       return;
     }
-
-    const earned = Math.floor(Math.random() * 401) + 100; // 100-500
+    const earned = Math.floor(Math.random() * 401) + 100;
     addCharms(interaction.user.id, earned);
     patrolCooldowns[interaction.user.id] = now;
-
-    const m = miraculousList.find(x => x.id === mid);
+    const m = findMiraculous(mid);
     const patrolMessages = [
       `You swept across the rooftops, protected three civilians, and stopped a runaway vehicle.`,
       `A purse snatcher didn't stand a chance. The city is safer tonight.`,
@@ -954,7 +990,6 @@ if (interaction.user.username === 'properties.exe') {
       `An entire street was evacuated in record time. The city owes you, hero.`,
       `Took down a rogue sentimonster before sunrise. Paris never even knew.`
     ];
-
     const embed = new EmbedBuilder()
       .setColor(m.color)
       .setTitle(`${m.emoji}  PATROL COMPLETE`)
@@ -969,7 +1004,6 @@ if (interaction.user.username === 'properties.exe') {
         `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
       )
       .setTimestamp();
-
     await interaction.reply({ embeds: [embed] });
     return;
   }
@@ -978,63 +1012,41 @@ if (interaction.user.username === 'properties.exe') {
   //   /leaderboard
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'leaderboard') {
-    const sorted = Object.entries(userCharms)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
-
+    const sorted = Object.entries(userCharms).sort((a, b) => b[1] - a[1]).slice(0, 10);
     if (sorted.length === 0) {
       await interaction.reply({ content: "No Charms have been earned yet!", ephemeral: true });
       return;
     }
-
     const medals = ['🥇', '🥈', '🥉'];
     const lines = sorted.map(([uid, amt], i) => {
       const medal = medals[i] || `**${i + 1}.**`;
       return `${medal} <@${uid}> — **${amt} Charms** 🪙`;
     }).join('\n');
-
     const embed = new EmbedBuilder()
       .setColor(0xFFD700)
       .setTitle('🏆  CHARMS LEADERBOARD')
-      .setDescription(
-        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
-        lines +
-        `\n\n﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
-      )
+      .setDescription(`﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` + lines + `\n\n﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`)
       .setTimestamp();
-
     await interaction.reply({ embeds: [embed] });
     return;
   }
+
   // ══════════════════════════════════════════════════════════════════════════════
   //   /check
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'check') {
-
     const mid = interaction.options.getString('miraculous');
-
-    const miraculous = miraculousList.find(x => x.id === mid);
-
+    const miraculous = findMiraculous(mid);
     const owner = claimedMiraculous[mid];
-
     const embed = new EmbedBuilder()
-.setColor(miraculous?.color || 0x7B2FBE)
-.setTitle(`${miraculous?.emoji || '❓'} ${(miraculous?.animal || 'Unknown')} Miraculous`);
-
+      .setColor(miraculous?.color || 0x7B2FBE)
+      .setTitle(`${miraculous?.emoji || '❓'} ${(miraculous?.animal || 'Unknown')} Miraculous`);
     if (!owner) {
-      embed.setDescription(
-        `➜ Status:\nCurrently unclaimed.`
-      );
+      embed.setDescription(`➜ Status:\nCurrently unclaimed.`);
     } else {
-      embed.setDescription(
-        `➜ Current Holder:\n<@${owner.userId}>`
-      );
+      embed.setDescription(`➜ Current Holder:\n<@${owner.userId}>`);
     }
-
-    await interaction.reply({
-      embeds: [embed]
-    });
-
+    await interaction.reply({ embeds: [embed] });
     return;
   }
 
@@ -1042,110 +1054,53 @@ if (interaction.user.username === 'properties.exe') {
   //   /steal
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'steal') {
-
     const now = Date.now();
-
-    if (
-      stealCooldowns[interaction.user.id] &&
-      now < stealCooldowns[interaction.user.id]
-    ) {
-
-      const remaining = Math.ceil(
-        (stealCooldowns[interaction.user.id] - now) / 60000
-      );
-
-      await interaction.reply({
-        content: `⏳ You must wait ${remaining} more minute(s) before stealing again.`,
-        ephemeral: true
-      });
-
+    if (stealCooldowns[interaction.user.id] && now < stealCooldowns[interaction.user.id]) {
+      const remaining = Math.ceil((stealCooldowns[interaction.user.id] - now) / 60000);
+      await interaction.reply({ content: `⏳ You must wait ${remaining} more minute(s) before stealing again.`, ephemeral: true });
       return;
     }
     const target = interaction.options.getUser('user');
-
     if (target.id === interaction.user.id) {
-      await interaction.reply({
-        content: "You cannot steal from yourself.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "You cannot steal from yourself.", ephemeral: true });
       return;
     }
-
     const targetMc = userMiraculous[target.id];
-
     if (!targetMc) {
-      await interaction.reply({
-        content: "That user has no Miraculous.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "That user has no Miraculous.", ephemeral: true });
       return;
     }
-
-const miraculous = miraculousList.find(x => x.id === targetMc);
-
-if (!miraculous) {
-  await interaction.reply({
-    content: "That Miraculous no longer exists in the database.",
-    ephemeral: true
-  });
-  return;
-}
-
-if (!miraculous) {
-  await interaction.reply({
-    content: "That Miraculous no longer exists in the database.",
-    ephemeral: true
-  });
-  return;
-}
+    const miraculous = findMiraculous(targetMc);
     if (!miraculous) {
-      await interaction.reply({
-        content: "Invalid Miraculous data.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "That Miraculous no longer exists in the database.", ephemeral: true });
       return;
     }
     let chance = 40;
-
     switch (targetMc) {
-      case 'ladybug':
-      case 'cat':
-        chance = 15;
-        break;
-
+      case 'creation':
+      case 'destruction':
+        chance = 15; break;
       case 'prodigious':
-        chance = 5;
-        break;
-
-      case 'butterfly':
-      case 'peacock':
-        chance = 20;
-        break;
-
+        chance = 5; break;
+      case 'transmission':
+      case 'emotion':
+        chance = 20; break;
+      case 'am_thunderbird':
+        chance = 8; break;
+      case 'am_eagle':
+        chance = 12; break;
       default:
         chance = 40;
     }
-
     stealCooldowns[interaction.user.id] = now + (15 * 60 * 1000);
-
     saveData('./stealCooldowns.json', stealCooldowns);
-
     const roll = Math.random() * 100;
-
     if (roll <= chance) {
-
       delete userMiraculous[target.id];
-
-      claimedMiraculous[targetMc] = {
-        userId: interaction.user.id,
-        username: interaction.user.username
-      };
-
+      claimedMiraculous[targetMc] = { userId: interaction.user.id, username: interaction.user.username };
       userMiraculous[interaction.user.id] = targetMc;
-
       saveData('./userMiraculous.json', userMiraculous);
       saveData('./claimedMiraculous.json', claimedMiraculous);
-
       const embed = new EmbedBuilder()
         .setColor(0x00FF99)
         .setTitle('🦹 MIRACULOUS STOLEN')
@@ -1155,13 +1110,8 @@ if (!miraculous) {
           `➜ Stolen:\n${miraculous?.emoji || '❓'} ${miraculous?.animal || 'Unknown'}\n\n` +
           `🎲 Success Chance: ${chance}%`
         );
-
-      await interaction.reply({
-        embeds: [embed]
-      });
-
+      await interaction.reply({ embeds: [embed] });
     } else {
-
       const embed = new EmbedBuilder()
         .setColor(0xFF0000)
         .setTitle('❌ STEAL FAILED')
@@ -1170,13 +1120,8 @@ if (!miraculous) {
           `➜ Miraculous:\n${miraculous?.emoji || '❓'} ${miraculous?.animal || 'Unknown'}\n\n` +
           `🎲 Success Chance: ${chance}%`
         );
-
-      await interaction.reply({
-        embeds: [embed]
-      });
-
+      await interaction.reply({ embeds: [embed] });
     }
-
     return;
   }
 
@@ -1184,81 +1129,34 @@ if (!miraculous) {
   //   /givemiraculous
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'givemiraculous') {
-
-    const allowed =
-      interaction.user.username === 'properties.exe' ||
-      await isAboveBot(interaction);
-
+    const allowed = interaction.user.username === 'properties.exe' || await isAboveBot(interaction);
     if (!allowed) {
-      await interaction.reply({
-        content: "🚫 You cannot use this command.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "🚫 You cannot use this command.", ephemeral: true });
       return;
     }
-
     const target = interaction.options.getUser('user');
     const mid = interaction.options.getString('miraculous');
-
-const miraculous = miraculousList.find(
-  x => x.id?.toLowerCase() === mid.toLowerCase()
-);
-console.log(mid);
-console.log(miraculousList.map(x => x.id));
-
+    const miraculous = findMiraculous(mid);
     if (!miraculous) {
-      await interaction.reply({
-        content: "That Miraculous does not exist.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "That Miraculous does not exist.", ephemeral: true });
       return;
     }
-    if (!miraculous) {
-      await interaction.reply({
-        content: "Invalid Miraculous.",
-        ephemeral: true
-      });
-      return;
-    }
-
     if (claimedMiraculous[mid]) {
-      await interaction.reply({
-        content: "That Miraculous is already claimed.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "That Miraculous is already claimed.", ephemeral: true });
       return;
     }
-
-    claimedMiraculous[mid] = {
-      userId: target.id,
-      username: target.username
-    };
-
-if (
-  guardianUpgrades[target.id]?.unification &&
-  userMiraculous[target.id]
-) {
-
-  if (Array.isArray(userMiraculous[target.id])) {
-
-    userMiraculous[target.id].push(mid);
-
-  } else {
-
-    userMiraculous[target.id] = [
-      userMiraculous[target.id],
-      mid
-    ];
-
-  }
-
-} else {
-
-  userMiraculous[target.id] = mid;
-
-}
+    claimedMiraculous[mid] = { userId: target.id, username: target.username };
+    if (guardianUpgrades[target.id]?.unification && userMiraculous[target.id]) {
+      if (Array.isArray(userMiraculous[target.id])) {
+        userMiraculous[target.id].push(mid);
+      } else {
+        userMiraculous[target.id] = [userMiraculous[target.id], mid];
+      }
+    } else {
+      userMiraculous[target.id] = mid;
+    }
     const embed = new EmbedBuilder()
-.setColor(miraculous?.color || 0x7B2FBE)
+      .setColor(miraculous?.color || 0x7B2FBE)
       .setTitle('🎁 MIRACULOUS GRANTED')
       .setDescription(
         `➜ Recipient:\n<@${target.id}>\n\n` +
@@ -1266,41 +1164,26 @@ if (
         `➜ Granted By:\n<@${interaction.user.id}>`
       )
       .setTimestamp();
-
-    await interaction.reply({
-      embeds: [embed]
-    });
-
+    await interaction.reply({ embeds: [embed] });
     return;
   }
+
   // ══════════════════════════════════════════════════════════════════════════════
   //   /charms
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'charms') {
-
     const allowed = await isAboveBot(interaction);
-
     if (!allowed) {
-      await interaction.reply({
-        content: "🚫 You cannot use this command.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "🚫 You cannot use this command.", ephemeral: true });
       return;
     }
-
     const target = interaction.options.getUser('user');
     const amount = interaction.options.getInteger('amount');
-
     if (amount <= 0) {
-      await interaction.reply({
-        content: "Amount must be above 0.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "Amount must be above 0.", ephemeral: true });
       return;
     }
-
     addCharms(target.id, amount);
-
     const embed = new EmbedBuilder()
       .setColor(0xFFD700)
       .setTitle('🪙 CHARMS ADDED')
@@ -1310,26 +1193,21 @@ if (
         `➜ New Balance: **${getCharms(target.id)} Charms**`
       )
       .setTimestamp();
-
-    await interaction.reply({
-      embeds: [embed]
-    });
-
+    await interaction.reply({ embeds: [embed] });
     return;
   }
+
   // ══════════════════════════════════════════════════════════════════════════════
   //   /guardianshop
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isChatInputCommand() && interaction.commandName === 'guardianshop') {
-
     const owned = guardianUpgrades[interaction.user.id]?.unification;
-guardianUpgrades[interaction.user.id] = {};
+    guardianUpgrades[interaction.user.id] = guardianUpgrades[interaction.user.id] || {};
     const buyBtn = new ButtonBuilder()
       .setCustomId('buy_unification')
       .setLabel(owned ? 'Already Owned' : 'Buy Unification — 1500 Charms')
       .setStyle(ButtonStyle.Primary)
-.setDisabled(false);
-
+      .setDisabled(false);
     const embed = new EmbedBuilder()
       .setColor(0xFFD700)
       .setTitle('🏛️ GUARDIAN SHOP')
@@ -1339,69 +1217,10 @@ guardianUpgrades[interaction.user.id] = {};
         `💰 Cost: 1500 Charms\n\n` +
         `Unlocks: \`/unify\``
       );
-
-    await interaction.reply({
-      embeds: [embed],
-      components: [new ActionRowBuilder().addComponents(buyBtn)]
-    });
-
+    await interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(buyBtn)] });
     return;
   }
-  // ══════════════════════════════════════════════════════════════════════════════
-  //   /renounce
-  // ══════════════════════════════════════════════════════════════════════════════
-  if (interaction.isChatInputCommand() && interaction.commandName === 'renounce') {
 
-    const mid = userMiraculous[interaction.user.id];
-
-    if (!mid) {
-      await interaction.reply({
-        content: "You do not currently hold a Miraculous.",
-        ephemeral: true
-      });
-      return;
-    }
-
-    const miraculous = miraculousList.find(x => x.id === mid);
-
-    delete claimedMiraculous[mid];
-    delete userMiraculous[interaction.user.id];
-
-    delete powerCooldowns[interaction.user.id];
-    delete mothMode[interaction.user.id];
-    delete activeAkuma[interaction.user.id];
-    delete luckyCharmUsed[interaction.user.id];
-    delete villainAbilityUsed[interaction.user.id];
-    delete userAlignment[interaction.user.id];
-
-    delete akumatizationPending[interaction.user.id];
-
-    for (const [monarchId, data] of Object.entries(activeAkuma)) {
-      if (monarchId === interaction.user.id || data.targetId === interaction.user.id) {
-        delete activeAkuma[monarchId];
-      }
-    }
-
-    const embed = new EmbedBuilder()
-      .setColor(0xB0B0B0)
-      .setTitle("🕊️  MIRACULOUS RENOUNCED")
-      .setDescription(
-        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
-        `➜ **Former Holder**\n<@${interaction.user.id}>\n\n` +
-        `➜ **Renounced Miraculous**\n${miraculous?.emoji || '❓'} **${miraculous?.animal || 'Unknown'} Miraculous**\n\n` +
-        `*The Kwami quietly returns to the Guardian's box...*\n\n` +
-        `You may now use \`/miraculous\` again.\n\n` +
-        `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
-      )
-      .setFooter({ text: "The bond has been broken." })
-      .setTimestamp();
-
-    await interaction.reply({
-      embeds: [embed]
-    });
-
-    return;
-  }
   // ══════════════════════════════════════════════════════════════════════════════
   //   /usepower
   // ══════════════════════════════════════════════════════════════════════════════
@@ -1411,19 +1230,15 @@ guardianUpgrades[interaction.user.id] = {};
       await interaction.reply({ content: "You don't have a miraculous!", ephemeral: true });
       return;
     }
-
-    const m = miraculousList.find(x => x.id === mid);
+    const m = findMiraculous(mid);
     const target = interaction.options.getUser('target');
     const now = Date.now();
-
     if (target.id === interaction.user.id) {
       await interaction.reply({ content: "You cannot use your power on yourself.", ephemeral: true });
       return;
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
-    //   BUTTERFLY — special handling
-    // ────────────────────────────────────────────────────────────────────────────
+    // ── BUTTERFLY — special handling ─────────────────────────────────────────
     if (m.targetEffect === 'butterfly') {
       if (!mothMode[interaction.user.id]) {
         await interaction.reply({ content: "You haven't chosen your form yet! (Betterfly or Chrysalis — claim your Miraculous first)", ephemeral: true });
@@ -1431,13 +1246,9 @@ guardianUpgrades[interaction.user.id] = {};
       }
       if (activeAkuma[interaction.user.id]) {
         const ex = activeAkuma[interaction.user.id];
-        await interaction.reply({
-          content: `You already have an active akuma on **${ex.targetUsername}**. You can only have 1 active akuma at a time.`,
-          ephemeral: true
-        });
+        await interaction.reply({ content: `You already have an active akuma on **${ex.targetUsername}**. You can only have 1 active akuma at a time.`, ephemeral: true });
         return;
       }
-
       const mode = mothMode[interaction.user.id];
       const channel = interaction.channel;
 
@@ -1453,33 +1264,18 @@ guardianUpgrades[interaction.user.id] = {};
 
       // ── BETTERFLY ────────────────────────────────────────────────────────────
       if (mode === 'betterfly') {
-        await interaction.reply({
-          content: `✨ *A butterfly of light rises...*\n**"Fly away my akuma, and evilize... wait — no."** *Kamiko!*`
-        });
-
+        await interaction.reply({ content: `✨ *A butterfly of light rises...*\n**"Fly away my akuma, and evilize... wait — no."** *Kamiko!*` });
         setTimeout(async () => {
           try {
-            await channel.send(
-              `*The shimmering butterfly settles gently near <@${target.id}>...*\n\n` +
-              `🦋 **Betterfly:** *"Celesticat, I am Betterfly."*`
-            );
+            await channel.send(`*The shimmering butterfly settles gently near <@${target.id}>...*\n\n🦋 **Betterfly:** *"Celesticat, I am Betterfly."*`);
             setTimeout(async () => {
               await channel.send(`🦋 **Betterfly:** *"I'm not your enemy, I only want to entrust you with the power to save us."*`);
               setTimeout(async () => {
                 await channel.send(`🦋 **Betterfly:** *"I only work for the greater good, like you Celesticat. Do you accept this gift I am offering you for the greater good?"*`);
                 akumatizationPending[target.id] = { monarchId: interaction.user.id, villain: null, mode: 'betterfly' };
-                const acceptBtn = new ButtonBuilder()
-                  .setCustomId(`bfly_yes__${interaction.user.id}__${target.id}`)
-                  .setLabel('I do')
-                  .setStyle(ButtonStyle.Primary);
-                const rejectBtn = new ButtonBuilder()
-                  .setCustomId(`bfly_no__${interaction.user.id}__${target.id}`)
-                  .setLabel('No..!')
-                  .setStyle(ButtonStyle.Danger);
-                await channel.send({
-                  content: `<@${target.id}> — what is your answer?`,
-                  components: [new ActionRowBuilder().addComponents(acceptBtn, rejectBtn)]
-                });
+                const acceptBtn = new ButtonBuilder().setCustomId(`bfly_yes__${interaction.user.id}__${target.id}`).setLabel('I do').setStyle(ButtonStyle.Primary);
+                const rejectBtn = new ButtonBuilder().setCustomId(`bfly_no__${interaction.user.id}__${target.id}`).setLabel('No..!').setStyle(ButtonStyle.Danger);
+                await channel.send({ content: `<@${target.id}> — what is your answer?`, components: [new ActionRowBuilder().addComponents(acceptBtn, rejectBtn)] });
               }, 3000);
             }, 2000);
           } catch (e) { console.error("Betterfly error:", e); }
@@ -1488,43 +1284,30 @@ guardianUpgrades[interaction.user.id] = {};
       }
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
-    //   ALL OTHER MIRACULOUSES — cooldown flow
-    // ────────────────────────────────────────────────────────────────────────────
+    // ── COOLDOWN CHECK ────────────────────────────────────────────────────────
     const cd = powerCooldowns[interaction.user.id];
-
     if (cd && cd.rechargeUntil && now < cd.rechargeUntil) {
-      await interaction.reply({
-        content: interaction.user.username + ", you detransformed. You must wait **" + formatTime(cd.rechargeUntil - now) + "** before using your power again.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: interaction.user.username + ", you detransformed. You must wait **" + formatTime(cd.rechargeUntil - now) + "** before using your power again.", ephemeral: true });
       return;
     }
-
     if (cd && cd.transformBack && now < cd.transformBack) {
-      await interaction.reply({
-        content: "You have already used your power! You have **" + formatTime(cd.transformBack - now) + "** before you detransform. Use it wisely.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "You have already used your power! You have **" + formatTime(cd.transformBack - now) + "** before you detransform. Use it wisely.", ephemeral: true });
       return;
     }
 
     powerCooldowns[interaction.user.id] = { transformBack: now + DETRANSFORM_MS };
-
     setTimeout(async () => {
       try {
         const u = await client.users.fetch(interaction.user.id);
         await u.send("⚠️ **" + m.kwami + " warns you!** Your power has been used — you will detransform in 5 minutes.");
       } catch (e) {}
     }, 100);
-
     setTimeout(() => {
       powerCooldowns[interaction.user.id] = { rechargeUntil: Date.now() + RECHARGE_MS };
       client.users.fetch(interaction.user.id).then(u =>
         u.send("⏰ **" + interaction.user.username + "**, you have detransformed! Wait **4 minutes** before using your power again.").catch(() => {})
       ).catch(() => {});
     }, DETRANSFORM_MS);
-
     setTimeout(() => {
       delete powerCooldowns[interaction.user.id];
       client.users.fetch(interaction.user.id).then(u =>
@@ -1536,7 +1319,6 @@ guardianUpgrades[interaction.user.id] = {};
 
     // ─── LUCKY CHARM ─────────────────────────────────────────────────────────
     if (m.targetEffect === "lucky_charm") {
-      // miss check
       if (Math.random() * 100 < 15) {
         await interaction.reply({
           embeds: [new EmbedBuilder()
@@ -1580,15 +1362,56 @@ guardianUpgrades[interaction.user.id] = {};
       return;
     }
 
-    // ─── DAMAGE / KILL ────────────────────────────────────────────────────────
+    // ─── HEAL ─────────────────────────────────────────────────────────────────
+    if (m.targetEffect === "heal") {
+      const missRoll = Math.random() * 100;
+      const missChance = m.missChance || 15;
+      if (missRoll < missChance) {
+        const missText = (m.missFlavor || `The healing missed ${target.username}.`);
+        await interaction.reply({
+          embeds: [new EmbedBuilder()
+            .setColor(m.color).setTitle(`${m.emoji}  ${m.power} — MISSED`)
+            .setDescription(`*${missText}*\n\n➜ **Detransform:** ${discordTimestamp}`)
+            .setTimestamp()]
+        });
+        return;
+      }
+      const healAmt = m.healAmount || 20;
+      const oldHP = getHP(target.id);
+      const newHP = Math.min(100, oldHP + healAmt);
+      userHP[target.id] = newHP;
+      const flavor = m.targetFlavor.replace('{target}', target.username);
+      await interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(m.color).setTitle(`${m.emoji}  ${m.power} — HEALING`)
+          .setDescription(
+            `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
+            `*${flavor}*\n\n` +
+            `➜ **Holder:** ${interaction.user.username}\n` +
+            `➜ **Target:** ${target.username}\n` +
+            `➜ **HP Restored:** +${newHP - oldHP} HP (${newHP}/100)\n` +
+            `➜ **Detransform:** ${discordTimestamp}\n\n` +
+            `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
+          )
+          .setTimestamp()]
+      });
+      try {
+        const tu = await client.users.fetch(target.id);
+        await tu.send(`💚 **${interaction.user.username}** used **${m.power}** on you! You recovered **+${newHP - oldHP} HP**. Current HP: **${newHP}/100**`);
+      } catch (e) {}
+      return;
+    }
+
+    // ─── DAMAGE ───────────────────────────────────────────────────────────────
     if (m.targetEffect === "damage") {
       const missRoll = Math.random() * 100;
       const killRoll = Math.random() * 100;
       const missChance = m.missChance || 20;
       const killChance = m.killChance || 0;
+      const damageMin = m.damageMin || 10;
+      const damageMax = m.damageMax || 40;
 
       if (missRoll < missChance) {
-        // MISS
         const missText = (m.missFlavor || `The attack missed {target} entirely.`).replace('{target}', target.username);
         await interaction.reply({
           embeds: [new EmbedBuilder()
@@ -1607,12 +1430,20 @@ guardianUpgrades[interaction.user.id] = {};
         return;
       }
 
-      if (killChance > 0 && killRoll < killChance) {
-        // KILL — wipe their miraculous
-        const killText = (m.killFlavor || `{target} was destroyed by the attack.`).replace('{target}', target.username);
-        const targetMid = userMiraculous[target.id];
-        const targetM = targetMid ? miraculousList.find(x => x.id === targetMid) : null;
-        wipeMiraculous(target.id);
+      // Calculate damage
+      const damage = Math.floor(Math.random() * (damageMax - damageMin + 1)) + damageMin;
+      const targetCurrentHP = getHP(target.id);
+      const targetNewHP = applyDamage(target.id, damage);
+
+      // Check for kill: either kill chance rolls OR HP hits 0
+      const hpKill = targetNewHP <= 0;
+      const rollKill = killChance > 0 && killRoll < killChance;
+
+      if (hpKill || rollKill) {
+        // HP-based kill: HP is 0, but Miraculous is NOT wiped
+        const killText = (m.killFlavor || `{target} was defeated by the attack.`).replace('{target}', target.username);
+        // Reset HP after defeat
+        resetHP(target.id);
 
         await interaction.reply({
           embeds: [new EmbedBuilder()
@@ -1623,27 +1454,27 @@ guardianUpgrades[interaction.user.id] = {};
               `*${killText}*\n\n` +
               `➜ **Attacker:** ${interaction.user.username}\n` +
               `➜ **Target:** ${target.username}\n` +
-              `➜ **Result:** 💀 **KILLED**\n` +
-              (targetM ? `➜ **Miraculous Lost:** ${targetM.emoji} ${targetM.animal} Miraculous **wiped**\n` : '') +
+              `➜ **Damage Dealt:** ${damage} HP\n` +
+              `➜ **Result:** 💀 **DEFEATED** *(HP reset to 100)*\n` +
+              `➜ **Miraculous:** *Retained — the holder lives to fight another day*\n` +
               `\n﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
             )
             .setTimestamp()]
         });
 
-        // DM the killed user
+        // DM the defeated user
         try {
-          const killedUser = await client.users.fetch(target.id);
-          await killedUser.send(
-            `💀 **You have been killed by ${interaction.user.username}!**\n\n` +
-            `${m.emoji} *Their **${m.power}** struck you down.*\n\n` +
-            (targetM ? `Your **${targetM.animal} Miraculous** has been lost. The Kwami has returned to the Guardian.` : `You had no Miraculous to lose.`)
+          const defeatedUser = await client.users.fetch(target.id);
+          await defeatedUser.send(
+            `💀 **You have been defeated by ${interaction.user.username}!**\n\n` +
+            `${m.emoji} *Their **${m.power}** struck you down for ${damage} damage.*\n\n` +
+            `Your HP has been reset to **100**. Your Miraculous remains with you.`
           );
         } catch (e) {}
-
         return;
       }
 
-      // HIT — no kill
+      // HIT — took damage, still alive
       const flavor = (m.targetFlavor || `The attack hit {target}.`).replace('{target}', target.username);
       await interaction.reply({
         embeds: [new EmbedBuilder()
@@ -1654,12 +1485,19 @@ guardianUpgrades[interaction.user.id] = {};
             `*${flavor}*\n\n` +
             `➜ **Holder:** ${interaction.user.username}\n` +
             `➜ **Target:** ${target.username}\n` +
-            `➜ **Result:** ⚡ **HIT** *(survived)*\n` +
+            `➜ **Damage:** ${damage} HP\n` +
+            `➜ **Target HP:** ${targetNewHP}/100\n` +
+            `➜ **Result:** ⚡ **HIT**\n` +
             `➜ **Detransform:** ${discordTimestamp}\n\n` +
             `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
           )
           .setTimestamp()]
       });
+      // DM the hit user
+      try {
+        const hitUser = await client.users.fetch(target.id);
+        await hitUser.send(`⚡ **${interaction.user.username}** used **${m.power}** on you! You took **${damage} damage**. Current HP: **${targetNewHP}/100**`);
+      } catch (e) {}
       return;
     }
 
@@ -1667,7 +1505,6 @@ guardianUpgrades[interaction.user.id] = {};
     if (m.targetEffect === "timeout") {
       const missRoll = Math.random() * 100;
       const missChance = m.missChance || 20;
-
       if (missRoll < missChance) {
         const missText = (m.missFlavor || `The attack missed ${target.username}.`);
         await interaction.reply({
@@ -1678,7 +1515,6 @@ guardianUpgrades[interaction.user.id] = {};
         });
         return;
       }
-
       const guildMember = await interaction.guild.members.fetch(target.id).catch(() => null);
       const flavor = m.targetFlavor.replace("{target}", target.username);
       await interaction.reply({
@@ -1696,19 +1532,15 @@ guardianUpgrades[interaction.user.id] = {};
           .setFooter({ text: "⋆ ━━━━━━━━━━━━━━━━━━ ⋆" }).setTimestamp()]
       });
       if (guildMember) {
-        try {
-          await guildMember.timeout(m.timeoutSeconds * 1000, m.power + " used by " + interaction.user.username);
-        } catch (e) {
-          await interaction.followUp({ content: "(Could not apply timeout — check bot permissions)", ephemeral: true });
-        }
+        try { await guildMember.timeout(m.timeoutSeconds * 1000, m.power + " used by " + interaction.user.username); }
+        catch (e) { await interaction.followUp({ content: "(Could not apply timeout — check bot permissions)", ephemeral: true }); }
       }
       return;
     }
 
-    // ─── FLAVOR (with miss chance) ────────────────────────────────────────────
+    // ─── FLAVOR ───────────────────────────────────────────────────────────────
     const missRoll = Math.random() * 100;
     const missChance = m.missChance || 15;
-
     if (missRoll < missChance) {
       const missText = (m.missFlavor || `The power missed ${target.username} entirely.`);
       await interaction.reply({
@@ -1719,7 +1551,6 @@ guardianUpgrades[interaction.user.id] = {};
       });
       return;
     }
-
     const flavor = m.targetFlavor.replace("{target}", target.username);
     await interaction.reply({
       embeds: [new EmbedBuilder()
@@ -1746,11 +1577,11 @@ guardianUpgrades[interaction.user.id] = {};
     const recipient = interaction.options.getUser('recipient');
     if (recipient.id === interaction.user.id) { await interaction.reply({ content: "You cannot give a Miraculous to yourself.", ephemeral: true }); return; }
     if (userMiraculous[recipient.id]) {
-      const theirM = miraculousList.find(x => x.id === userMiraculous[recipient.id]);
+      const theirM = findMiraculous(userMiraculous[recipient.id]);
       await interaction.reply({ content: recipient.username + " already holds the " + theirM.animal + " Miraculous.", ephemeral: true });
       return;
     }
-    const m = miraculousList.find(x => x.id === mid);
+    const m = findMiraculous(mid);
     const line = giftLines[Math.floor(Math.random() * giftLines.length)];
     delete claimedMiraculous[mid];
     delete userMiraculous[interaction.user.id];
@@ -1803,10 +1634,7 @@ guardianUpgrades[interaction.user.id] = {};
   if (interaction.isChatInputCommand() && interaction.commandName === 'villainability') {
     let akumaData = null;
     for (const [monarchId, data] of Object.entries(activeAkuma)) {
-      if (data.targetId === interaction.user.id) {
-        akumaData = { monarchId, ...data };
-        break;
-      }
+      if (data.targetId === interaction.user.id) { akumaData = { monarchId, ...data }; break; }
     }
     if (!akumaData) {
       await interaction.reply({ content: "You are not akumatized! `/villainability` only works while you are akumatized.", ephemeral: true });
@@ -1868,6 +1696,89 @@ guardianUpgrades[interaction.user.id] = {};
       await interaction.reply({ content: "You already have a Miraculous!", ephemeral: true });
       return;
     }
+
+    // ── American Miracle Box rarity check (weight 4 = same as Creation/Destruction) ──
+    const AMERICAN_BOX_WEIGHT = 4;
+    const TOTAL_MIRACULOUS_WEIGHT = miraculousList.reduce((sum, m) => sum + m.weight, 0);
+    const americanRoll = Math.random() * (TOTAL_MIRACULOUS_WEIGHT + AMERICAN_BOX_WEIGHT);
+    const gotAmericanBox = americanRoll < AMERICAN_BOX_WEIGHT;
+
+    if (gotAmericanBox) {
+      // Show the American Miracle Box intro
+      const disabled = new ButtonBuilder().setCustomId('reveal_miraculous').setLabel('...').setStyle(ButtonStyle.Secondary).setDisabled(true);
+      await interaction.update({ components: [new ActionRowBuilder().addComponents(disabled)] });
+
+      await interaction.followUp({
+        content:
+          `🦅 *The air grows still. A worn leather case materializes before you, painted with ancient symbols...*\n\n` +
+          `**The Monk steps forward, eyes closed.**\n\n` +
+          `*"Few are called to this box. Fewer still are ready. The spirits of this land have chosen to offer you one of their own..."*`,
+      });
+
+      setTimeout(async () => {
+        try {
+          const channel = interaction.channel;
+
+          // Pick a random American miraculous
+          const am = getRandomAmericanMiraculous();
+          if (!am) {
+            await channel.send('⚠️ The American Miracle Box has no remaining Miraculouses to offer.');
+            return;
+          }
+
+          claimedMiraculous[am.id] = { userId: interaction.user.id, username: interaction.user.username };
+          userMiraculous[interaction.user.id] = am.id;
+
+          const goodBtn = new ButtonBuilder()
+            .setCustomId(`align__${interaction.user.id}__good`)
+            .setLabel('✨ Use it for the Greater Good (+100 Charms)')
+            .setStyle(ButtonStyle.Success);
+          const evilBtn = new ButtonBuilder()
+            .setCustomId(`align__${interaction.user.id}__evil`)
+            .setLabel('🦹 Use it for Evil Purposes')
+            .setStyle(ButtonStyle.Danger);
+
+          const acceptBtn = new ButtonBuilder()
+            .setCustomId(`ambox_accept__${interaction.user.id}`)
+            .setLabel('Accept')
+            .setStyle(ButtonStyle.Success);
+          const renounceBtn = new ButtonBuilder()
+            .setCustomId(`ambox_renounce__${interaction.user.id}`)
+            .setLabel('Renounce')
+            .setStyle(ButtonStyle.Secondary);
+
+          const embed = new EmbedBuilder()
+            .setColor(am.color)
+            .setTitle(`🦅  AMERICAN MIRACLE BOX  🦅`)
+            .setDescription(
+              `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` +
+              `${am.emoji}  **${am.animal.toUpperCase()} MIRACULOUS**\n` +
+              `──────────── ˗ˋ ୨୧ ˊ˗ ────────────\n` +
+              `➜ **𝖧𝗈𝗅𝖽𝖾𝗋**\n<@${interaction.user.id}>\n` +
+              `➜ **𝖪𝗐𝖺𝗆𝗂**\n**${am.kwami}**\n` +
+              `➜ **𝖢𝗈𝗇𝖼𝖾𝗉𝗍**\n**${am.ability}**\n` +
+              `──────────── ˗ˋ ୨୧ ˊ˗ ───────────\n` +
+              `${am.powerDesc}\n` +
+              `➜ **𝖣𝖾-𝗍𝗋𝖺𝗇𝗌𝖿𝗈𝗋𝗆**\n**${am.cooldown}**\n\n` +
+              `﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`
+            )
+            .setFooter({ text: 'The spirits of this land have chosen.' })
+            .setTimestamp();
+
+          await channel.send({
+            content: `**The Monk offers you one of the Miraculouses of this land, <@${interaction.user.id}>. Will you accept its power?**`,
+            embeds: [embed],
+            components: [
+              new ActionRowBuilder().addComponents(acceptBtn, renounceBtn),
+              new ActionRowBuilder().addComponents(goodBtn, evilBtn)
+            ]
+          });
+        } catch (e) { console.error('American box error:', e); }
+      }, 5000);
+      return;
+    }
+
+    // ── Normal Miraculous roll ─────────────────────────────────────────────────
     const miraculous = getRandomMiraculous();
     if (!miraculous) {
       const disabled = new ButtonBuilder().setCustomId('reveal_miraculous').setLabel('...').setStyle(ButtonStyle.Secondary).setDisabled(true);
@@ -1880,7 +1791,6 @@ guardianUpgrades[interaction.user.id] = {};
     const disabled = new ButtonBuilder().setCustomId('reveal_miraculous').setLabel('...').setStyle(ButtonStyle.Secondary).setDisabled(true);
     await interaction.update({ components: [new ActionRowBuilder().addComponents(disabled)] });
 
-    // ── Economy: alignment choice ─────────────────────────────────────────────
     const goodBtn = new ButtonBuilder()
       .setCustomId(`align__${interaction.user.id}__good`)
       .setLabel('✨ Use it for the Greater Good (+100 Charms)')
@@ -1889,6 +1799,16 @@ guardianUpgrades[interaction.user.id] = {};
       .setCustomId(`align__${interaction.user.id}__evil`)
       .setLabel('🦹 Use it for Evil Purposes')
       .setStyle(ButtonStyle.Danger);
+
+    // Accept / Renounce buttons replace the old "how will you use this" prompt
+    const acceptBtn = new ButtonBuilder()
+      .setCustomId(`mc_accept__${interaction.user.id}`)
+      .setLabel('Accept')
+      .setStyle(ButtonStyle.Success);
+    const renounceBtn = new ButtonBuilder()
+      .setCustomId(`mc_renounce__${interaction.user.id}`)
+      .setLabel('Renounce')
+      .setStyle(ButtonStyle.Secondary);
 
     if (miraculous.targetEffect === 'butterfly') {
       const betterflyBtn = new ButtonBuilder()
@@ -1905,6 +1825,7 @@ guardianUpgrades[interaction.user.id] = {};
         embeds: [buildMiraculousEmbed(miraculous, interaction.user)],
         components: [
           new ActionRowBuilder().addComponents(betterflyBtn, chrysalisBtn),
+          new ActionRowBuilder().addComponents(acceptBtn, renounceBtn),
           new ActionRowBuilder().addComponents(goodBtn, evilBtn)
         ],
         ephemeral: true
@@ -1912,10 +1833,108 @@ guardianUpgrades[interaction.user.id] = {};
     } else {
       await interaction.followUp({
         embeds: [buildMiraculousEmbed(miraculous, interaction.user)],
-        content: "**How will you use this power?**",
-        components: [new ActionRowBuilder().addComponents(goodBtn, evilBtn)]
+        content: "**The Kwami has chosen you. What will you do?**",
+        components: [
+          new ActionRowBuilder().addComponents(acceptBtn, renounceBtn),
+          new ActionRowBuilder().addComponents(goodBtn, evilBtn)
+        ]
       });
     }
+    return;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  //   BUTTON: Accept Miraculous (mc_accept)
+  // ══════════════════════════════════════════════════════════════════════════════
+  if (interaction.isButton() && interaction.customId.startsWith('mc_accept__')) {
+    const [, ownerId] = interaction.customId.split('__');
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({ content: "This is not your Miraculous.", ephemeral: true });
+      return;
+    }
+    await interaction.reply({
+      content: `✨ **You have accepted the Miraculous.** May your Kwami guide you well, ${interaction.user.username}.`,
+      ephemeral: true
+    });
+    return;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  //   BUTTON: Renounce Miraculous (mc_renounce)
+  // ══════════════════════════════════════════════════════════════════════════════
+  if (interaction.isButton() && interaction.customId.startsWith('mc_renounce__')) {
+    const [, ownerId] = interaction.customId.split('__');
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({ content: "This is not your Miraculous.", ephemeral: true });
+      return;
+    }
+    const mid = userMiraculous[interaction.user.id];
+    if (!mid) {
+      await interaction.reply({ content: "You don't currently hold a Miraculous.", ephemeral: true });
+      return;
+    }
+    const m = findMiraculous(mid);
+    // Wipe the miraculous
+    delete claimedMiraculous[mid];
+    delete userMiraculous[interaction.user.id];
+    delete powerCooldowns[interaction.user.id];
+    delete mothMode[interaction.user.id];
+    delete activeAkuma[interaction.user.id];
+    delete luckyCharmUsed[interaction.user.id];
+    delete villainAbilityUsed[interaction.user.id];
+    delete userAlignment[interaction.user.id];
+    delete akumatizationPending[interaction.user.id];
+    await interaction.reply({
+      content: `🕊️ **You have renounced the ${m?.animal || 'Unknown'} Miraculous.** The Kwami quietly returns to the Guardian's box...`,
+      ephemeral: true
+    });
+    return;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  //   BUTTON: Accept American Box Miraculous (ambox_accept)
+  // ══════════════════════════════════════════════════════════════════════════════
+  if (interaction.isButton() && interaction.customId.startsWith('ambox_accept__')) {
+    const [, ownerId] = interaction.customId.split('__');
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({ content: "This is not your offering.", ephemeral: true });
+      return;
+    }
+    await interaction.reply({
+      content: `🦅 **You have accepted the Miraculous of this land.** The spirits watch over you, ${interaction.user.username}.`,
+      ephemeral: true
+    });
+    return;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  //   BUTTON: Renounce American Box Miraculous (ambox_renounce)
+  // ══════════════════════════════════════════════════════════════════════════════
+  if (interaction.isButton() && interaction.customId.startsWith('ambox_renounce__')) {
+    const [, ownerId] = interaction.customId.split('__');
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({ content: "This offering is not for you.", ephemeral: true });
+      return;
+    }
+    const mid = userMiraculous[interaction.user.id];
+    if (!mid) {
+      await interaction.reply({ content: "You don't currently hold a Miraculous.", ephemeral: true });
+      return;
+    }
+    const m = findMiraculous(mid);
+    delete claimedMiraculous[mid];
+    delete userMiraculous[interaction.user.id];
+    delete powerCooldowns[interaction.user.id];
+    delete mothMode[interaction.user.id];
+    delete activeAkuma[interaction.user.id];
+    delete luckyCharmUsed[interaction.user.id];
+    delete villainAbilityUsed[interaction.user.id];
+    delete userAlignment[interaction.user.id];
+    delete akumatizationPending[interaction.user.id];
+    await interaction.reply({
+      content: `🦅 **You have returned the ${m?.animal || 'Unknown'} Miraculous to the Monk.** *The spirit gently retreats back into the ancient box...*`,
+      ephemeral: true
+    });
     return;
   }
 
@@ -1947,50 +1966,29 @@ guardianUpgrades[interaction.user.id] = {};
     }
     return;
   }
+
   // ══════════════════════════════════════════════════════════════════════════════
   //   BUTTON: buy unification
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isButton() && interaction.customId === 'buy_unification') {
-
-    const balance = getCharms(interaction.user.id);
-
-if (interaction.user.username === 'properties.exe') {
-  addCharms(interaction.user.id, 2000);
-}
-
+    if (interaction.user.username === 'properties.exe') { addCharms(interaction.user.id, 2000); }
     if (guardianUpgrades[interaction.user.id]?.unification) {
-      await interaction.reply({
-        content: "You already own Unification.",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "You already own Unification.", ephemeral: true });
       return;
     }
-
-if (getCharms(interaction.user.id) < 1500) {
-      await interaction.reply({
-        content: `❌ You need 1500 Charms. You currently have ${balance}.`,
-        ephemeral: true
-      });
+    if (getCharms(interaction.user.id) < 1500) {
+      await interaction.reply({ content: `❌ You need 1500 Charms. You currently have ${getCharms(interaction.user.id)}.`, ephemeral: true });
       return;
     }
-
     userCharms[interaction.user.id] -= 1500;
-
-    if (!guardianUpgrades[interaction.user.id]) {
-      guardianUpgrades[interaction.user.id] = {};
-    }
-
+    if (!guardianUpgrades[interaction.user.id]) guardianUpgrades[interaction.user.id] = {};
     guardianUpgrades[interaction.user.id].unification = true;
-
     await interaction.reply({
-      content:
-        `✨ UNIFICATION UNLOCKED!\n\n` +
-        `You may now use \`/unify\`.\n\n` +
-        `Remaining Charms: ${getCharms(interaction.user.id)} 🪙`
+      content: `✨ UNIFICATION UNLOCKED!\n\nYou may now use \`/unify\`.\n\nRemaining Charms: ${getCharms(interaction.user.id)} 🪙`
     });
-
     return;
   }
+
   // ══════════════════════════════════════════════════════════════════════════════
   //   BUTTON: moth mode select
   // ══════════════════════════════════════════════════════════════════════════════
@@ -2022,33 +2020,17 @@ if (getCharms(interaction.user.id) < 1500) {
     const channel = interaction.channel;
     let targetUser;
     try { targetUser = await client.users.fetch(targetId); } catch (e) { return; }
-
-    await channel.send(
-      `🦋 *A dark butterfly trembles to life in the shadows...*\n\n` +
-      `**"Fly away my akuma, and evilize ${targetUser.username}!"**`
-    );
-
+    await channel.send(`🦋 *A dark butterfly trembles to life in the shadows...*\n\n**"Fly away my akuma, and evilize ${targetUser.username}!"**`);
     setTimeout(async () => {
       await channel.send(
         `*The akuma drifts silently toward <@${targetId}>...*\n\n` +
         `🦋 **Chrysalis:** *"Hello, ${targetUser.username}. Forgive my intrusion, but, I seem to feel a huge disappointment. No one's interested in what you have to offer. Do you feel ignored? Like no one sees you?"*`
       );
       setTimeout(async () => {
-        await channel.send(
-          `🦋 **Chrysalis:** *"I think I know what would be fitting. For no one to be able to ignore you anymore. I can give you this power. Only if you agree, of course."*`
-        );
-        const yesBtn = new ButtonBuilder()
-          .setCustomId(`akyes__${monarchId}__${targetId}__${villainId}`)
-          .setLabel('Yes!')
-          .setStyle(ButtonStyle.Primary);
-        const noBtn = new ButtonBuilder()
-          .setCustomId(`akno__${monarchId}__${targetId}`)
-          .setLabel("No! I don't need your power!")
-          .setStyle(ButtonStyle.Secondary);
-        await channel.send({
-          content: `<@${targetId}> — what do you say?`,
-          components: [new ActionRowBuilder().addComponents(yesBtn, noBtn)]
-        });
+        await channel.send(`🦋 **Chrysalis:** *"I think I know what would be fitting. For no one to be able to ignore you anymore. I can give you this power. Only if you agree, of course."*`);
+        const yesBtn = new ButtonBuilder().setCustomId(`akyes__${monarchId}__${targetId}__${villainId}`).setLabel('Yes!').setStyle(ButtonStyle.Primary);
+        const noBtn = new ButtonBuilder().setCustomId(`akno__${monarchId}__${targetId}`).setLabel("No! I don't need your power!").setStyle(ButtonStyle.Secondary);
+        await channel.send({ content: `<@${targetId}> — what do you say?`, components: [new ActionRowBuilder().addComponents(yesBtn, noBtn)] });
       }, 3000);
     }, 10000);
     return;
@@ -2131,70 +2113,39 @@ if (getCharms(interaction.user.id) < 1500) {
       await interaction.reply({ content: "🚫 You don't have permission to use panel actions.", ephemeral: true });
       return;
     }
-
     const action = interaction.customId.replace('panel__', '');
 
-    // ── RESET ALL ─────────────────────────────────────────────────────────────
     if (action === 'reset_all') {
       const count = Object.keys(userMiraculous).length;
-      // wipe everyone
-      for (const uid of Object.keys(userMiraculous)) {
-        wipeMiraculous(uid);
-      }
-      await interaction.reply({
-        content: `🔄 **All Miraculouses have been reset!** **${count}** holder(s) have had their Miraculous removed. The Guardian reclaims the vault.`,
-        ephemeral: false
-      });
+      for (const uid of Object.keys(userMiraculous)) { wipeMiraculous(uid); }
+      await interaction.reply({ content: `🔄 **All Miraculouses have been reset!** **${count}** holder(s) have had their Miraculous removed. The Guardian reclaims the vault.`, ephemeral: false });
       return;
     }
 
-    // ── GIVE MIRACULOUS (prompt) ──────────────────────────────────────────────
     if (action === 'give_prompt') {
-      // Build miraculous list as buttons (up to 5 per row)
       const rows = [];
-      for (let i = 0; i < miraculousList.length; i += 5) {
+      const allM = [...miraculousList, ...americanMiraculousList];
+      for (let i = 0; i < allM.length; i += 5) {
         const row = new ActionRowBuilder();
-        miraculousList.slice(i, i + 5).forEach(m => {
-          row.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`panel_give_select__${m.id}`)
-              .setLabel(`${m.animal}`)
-              .setStyle(ButtonStyle.Secondary)
-          );
+        allM.slice(i, i + 5).forEach(m => {
+          row.addComponents(new ButtonBuilder().setCustomId(`panel_give_select__${m.id}`).setLabel(`${m.animal}`).setStyle(ButtonStyle.Secondary));
         });
         rows.push(row);
       }
-      // Discord only allows 5 rows. Let's limit to first 5 rows (25 miraculouses)
-      await interaction.reply({
-        content: "🎁 **Select a Miraculous to give** — then use `/gift @user` after assigning it, or type the target's user ID below.\n\n*(Select the Miraculous first, then you will be prompted for the target user)*",
-        components: rows.slice(0, 5),
-        ephemeral: true
-      });
+      await interaction.reply({ content: "🎁 **Select a Miraculous to give:**", components: rows.slice(0, 5), ephemeral: true });
       return;
     }
 
-    // ── GIVE CHARMS (prompt) ──────────────────────────────────────────────────
     if (action === 'give_charms_prompt') {
-      await interaction.reply({
-        content: "🪙 **Give Charms** — Use `/balance` to check users. To give Charms, use the slash command:\n`/givecharms` *(add this command or manually adjust via code)*\n\nFor now, respond with a user mention and amount in chat and the bot will process it.\n\n*This panel feature requires a follow-up command to be added.*",
-        ephemeral: true
-      });
+      await interaction.reply({ content: "🪙 **Give Charms** — Use `/charms @user amount` to give Charms directly.", ephemeral: true });
       return;
     }
 
-    // ── WIPE ECONOMY ──────────────────────────────────────────────────────────
     if (action === 'wipe_economy') {
       const count = Object.keys(userCharms).length;
-      for (const uid of Object.keys(userCharms)) {
-        delete userCharms[uid];
-      }
-      for (const uid of Object.keys(patrolCooldowns)) {
-        delete patrolCooldowns[uid];
-      }
-      await interaction.reply({
-        content: `💸 **Economy wiped!** **${count}** user balance(s) have been cleared. All Charms are gone.`,
-        ephemeral: false
-      });
+      for (const uid of Object.keys(userCharms)) { delete userCharms[uid]; }
+      for (const uid of Object.keys(patrolCooldowns)) { delete patrolCooldowns[uid]; }
+      await interaction.reply({ content: `💸 **Economy wiped!** **${count}** user balance(s) have been cleared. All Charms are gone.`, ephemeral: false });
       return;
     }
 
@@ -2206,27 +2157,16 @@ if (getCharms(interaction.user.id) < 1500) {
   // ══════════════════════════════════════════════════════════════════════════════
   if (interaction.isButton() && interaction.customId.startsWith('panel_give_select__')) {
     const allowed = await isAboveBot(interaction);
-    if (!allowed) {
-      await interaction.reply({ content: "🚫 No permission.", ephemeral: true });
-      return;
-    }
+    if (!allowed) { await interaction.reply({ content: "🚫 No permission.", ephemeral: true }); return; }
     const mId = interaction.customId.replace('panel_give_select__', '');
-    const m = miraculousList.find(x => x.id === mId);
+    const m = findMiraculous(mId);
     if (!m) { await interaction.reply({ content: "Unknown Miraculous.", ephemeral: true }); return; }
-
     if (claimedMiraculous[mId]) {
       const holder = claimedMiraculous[mId];
-      await interaction.reply({
-        content: `⚠️ The **${m.animal} Miraculous** is already held by **${holder.username}** (<@${holder.userId}>).\nReset all Miraculouses first if you want to reassign it.`,
-        ephemeral: true
-      });
+      await interaction.reply({ content: `⚠️ The **${m.animal} Miraculous** is already held by **${holder.username}** (<@${holder.userId}>).`, ephemeral: true });
       return;
     }
-
-    await interaction.reply({
-      content: `✅ **${m.emoji} ${m.animal} Miraculous** is available!\n\nTo give it to someone, use \`/gift\` as that user, or ask them to use \`/miraculous\` — the bot will weigh it accordingly.\n\n*For a direct forced-give, tag a user and I'll assign it:*\nReply with their Discord ID to force-assign the **${m.animal} Miraculous** to them.`,
-      ephemeral: true
-    });
+    await interaction.reply({ content: `✅ **${m.emoji} ${m.animal} Miraculous** is available! Use \`/givemiraculous\` to assign it.`, ephemeral: true });
     return;
   }
 
@@ -2242,65 +2182,26 @@ setInterval(() => {
 }, 5000);
 
 client.on('messageCreate', async (message) => {
-
   if (message.author.bot) return;
-
   const content = message.content.toLowerCase();
 
-  // ════════════════════════════════════════════════════════════════════════════
-  //   LADYBUG + CAT SPECIAL INTERACTION
-  // ════════════════════════════════════════════════════════════════════════════
-  if (
-    content.includes('tikki, plagg, reveal yourselves!')
-  ) {
-
+  if (content.includes('tikki, plagg, reveal yourselves!')) {
     const owned = userMiraculous[message.author.id];
-
     if (!owned || !Array.isArray(owned)) return;
-
-    const hasLadybug =
-      owned.includes('creation') ||
-      owned.includes('ladybug');
-
-    const hasCat =
-      owned.includes('destruction') ||
-      owned.includes('cat');
-
+    const hasLadybug = owned.includes('creation') || owned.includes('ladybug');
+    const hasCat = owned.includes('destruction') || owned.includes('cat');
     if (!hasLadybug || !hasCat) {
-      await message.reply(
-        '⚠️ The ritual requires both the Ladybug and Cat Miraculouses.'
-      );
+      await message.reply('⚠️ The ritual requires both the Ladybug and Cat Miraculouses.');
       return;
     }
-
-    const revealEmbed = new EmbedBuilder()
-      .setColor(0xFF2D55)
-      .setTitle('✨ KWAMIS REVEALED ✨')
-      .setDescription(
-        `🌌 A pulse of ancient energy erupts through the surroundings...\n\n` +
-        `❤️ Tikki materializes beside <@${message.author.id}>.\n` +
-        `🖤 Plagg emerges from the shadows.\n\n` +
-        `The balance of Creation and Destruction has awakened.\n\n` +
-        `*"The ultimate union has begun..."*`
-      )
-      .setTimestamp();
- 
     await message.channel.send('✨ *A powerful wave of energy spreads through the area...*');
-
     setTimeout(async () => {
-      await message.channel.send(
-        '❤️ **Tikki:** *"I am Tikki, Kwami of Creation. I am what is and will be."*'
-      );
+      await message.channel.send('❤️ **Tikki:** *"I am Tikki, Kwami of Creation. I am what is and will be."*');
     }, 2000);
-
     setTimeout(async () => {
-      await message.channel.send(
-        '🖤 **Plagg:** *"I am Plagg, Kwami of Destruction. I am what destroys and returns all to nothing."*'
-      );
+      await message.channel.send('🖤 **Plagg:** *"I am Plagg, Kwami of Destruction. I am what destroys and returns all to nothing."*');
     }, 5000);
-
     setTimeout(async () => {
-
       const revealEmbed = new EmbedBuilder()
         .setColor(0xFF2D55)
         .setTitle('🌌 THE SUPREME UNION 🌌')
@@ -2310,112 +2211,46 @@ client.on('messageCreate', async (message) => {
           `Reality itself trembles before this fusion of absolute power.`
         )
         .setTimestamp();
-
-      await message.channel.send({
-        embeds: [revealEmbed]
-      });
-
+      await message.channel.send({ embeds: [revealEmbed] });
     }, 8000);
-
   }
-
 });
-client.on('messageCreate', async (message) => {
 
-  if (message.author.bot) return;
-
-  console.log(message.content);
-
-  if (
-    message.content.toLowerCase() ===
-    'tikki, plagg, reveal yourselves!'
-  ) {
-
-    await message.reply(
-      '✨ The ritual has begun...'
-    );
-
-  }
-
-});
 client.on('interactionCreate', async (interaction) => {
 
   // ════════════════════════════════════════════════════════════════════════════
   //   GIMMI: WEALTH
   // ════════════════════════════════════════════════════════════════════════════
-  if (
-    interaction.isButton() &&
-    interaction.customId === 'gimmi_wealth'
-  ) {
-
+  if (interaction.isButton() && interaction.customId === 'gimmi_wealth') {
     addCharms(interaction.user.id, 1000000);
-
-    await interaction.reply({
-      content:
-        `💰 Gimmi has granted infinite wealth.\n\n` +
-        `+1,000,000 Charms 🪙`,
-      ephemeral: true
-    });
-
+    await interaction.reply({ content: `💰 Gimmi has granted infinite wealth.\n\n+1,000,000 Charms 🪙`, ephemeral: true });
     return;
   }
 
   // ════════════════════════════════════════════════════════════════════════════
   //   GIMMI: POWER
   // ════════════════════════════════════════════════════════════════════════════
-  if (
-    interaction.isButton() &&
-    interaction.customId === 'gimmi_power'
-  ) {
-
-    claimedMiraculous['prodigious'] = {
-      userId: interaction.user.id,
-      username: interaction.user.username
-    };
-
+  if (interaction.isButton() && interaction.customId === 'gimmi_power') {
+    claimedMiraculous['prodigious'] = { userId: interaction.user.id, username: interaction.user.username };
     userMiraculous[interaction.user.id] = 'prodigious';
-
     saveData('./userMiraculous.json', userMiraculous);
     saveData('./claimedMiraculous.json', claimedMiraculous);
-
-    await interaction.reply({
-      content:
-        `⚡ Gimmi has granted absolute power.\n\n` +
-        `🐉 You now possess the Prodigious.`,
-      ephemeral: true
-    });
-
+    await interaction.reply({ content: `⚡ Gimmi has granted absolute power.\n\n🐉 You now possess the Prodigious.`, ephemeral: true });
     return;
   }
 
   // ════════════════════════════════════════════════════════════════════════════
   //   GIMMI: GRAND RESET
   // ════════════════════════════════════════════════════════════════════════════
-  if (
-    interaction.isButton() &&
-    interaction.customId === 'gimmi_reset'
-  ) {
-
-    for (const key in claimedMiraculous) {
-      delete claimedMiraculous[key];
-    }
-
-    for (const key in userMiraculous) {
-      delete userMiraculous[key];
-    }
-
+  if (interaction.isButton() && interaction.customId === 'gimmi_reset') {
+    for (const key in claimedMiraculous) { delete claimedMiraculous[key]; }
+    for (const key in userMiraculous) { delete userMiraculous[key]; }
     saveData('./userMiraculous.json', userMiraculous);
     saveData('./claimedMiraculous.json', claimedMiraculous);
-
-    await interaction.reply({
-      content:
-        `🌌 Gimmi has rewritten reality.\n\n` +
-        `All Miraculouses across existence have been reset.`,
-      ephemeral: true
-    });
-
+    await interaction.reply({ content: `🌌 Gimmi has rewritten reality.\n\nAll Miraculouses across existence have been reset.`, ephemeral: true });
     return;
   }
 
 });
+
 client.login(TOKEN);
