@@ -900,7 +900,8 @@ async function isAboveBot(interaction) {
 }
 
 client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
+  try {
+    if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
 
   // ══════════════════════════════════════════════════════════════════════════════
   //   /miraculous
@@ -1173,9 +1174,13 @@ saveAll();
       .setTitle('🏆  CHARMS LEADERBOARD')
       .setDescription(`﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉\n\n` + lines + `\n\n﹉﹉﹉﹉﹉﹉﹉୨♡୧﹉﹉﹉﹉﹉﹉﹉`)
       .setTimestamp();
-    await interaction.reply({ embeds: [embed] });
-    return;
+ if (!interaction.replied && !interaction.deferred) {
+  await interaction.reply({ embeds: [embed] });
+}
+      } catch (err) {
+    console.error(err);
   }
+});
 
   // ══════════════════════════════════════════════════════════════════════════════
   //   /check
